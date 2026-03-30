@@ -30,12 +30,38 @@ A Primary Flight Display (PFD) interface created with Pygame for real-time visua
     pip install numpy pygame
     ```
 
+    For MSP mode (mode 3), also install:
+    ```bash
+    pip install pyserial
+    ```
+
 4. Run an example:
     ```bash
     python example.py
     ```
 
 ## Usage
+
+### Mode Selector
+
+The application now supports three runtime modes:
+
+- Mode 1: Manual control with joystick (Saitek X52 preferred)
+- Mode 2: Real-time X-Plane data through UDP
+- Mode 3: IMU data from a flight controller through MSP (serial)
+
+Examples:
+
+```bash
+# Mode 1: Joystick
+python main.py --mode 1 --joystick-name X52
+
+# Mode 2: X-Plane UDP
+python main.py --mode 2 --xplane-ip 127.0.0.1 --xplane-port 49000
+
+# Mode 3: MSP serial
+python main.py --mode 3 --msp-port /dev/tty.usbserial --msp-baud 115200
+```
 
 Below is an example demonstrating how to use the PFD interface with `AircraftState` and `PrimaryFlightDisplay`:
 
