@@ -9,6 +9,21 @@
 import numpy as np
 
 
+PFD_COLORS = {
+    "text_primary": (240, 240, 240),
+    "text_dim": (185, 185, 185),
+    "panel_bg": (78, 78, 78, 220),
+    "panel_bg_dark": (16, 16, 16),
+    "sky": (26, 92, 224),
+    "ground": (112, 60, 0),
+    "magenta": (240, 0, 255),
+    "green": (35, 255, 0),
+    "cyan": (0, 220, 255),
+    "warning": (255, 218, 0),
+    "danger": (255, 64, 64),
+}
+
+
 def quit_out_range(a: np.ndarray, min_val: float, max_val: float):
     return a[np.where((a >= min_val) & (a <= max_val))]
 

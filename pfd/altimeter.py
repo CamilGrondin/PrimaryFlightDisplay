@@ -8,7 +8,7 @@
 import numpy as np
 import pygame
 
-from .common import get_digit, quit_out_range
+from .common import PFD_COLORS, get_digit, quit_out_range
 
 
 class AltitudeIndicator:
@@ -28,7 +28,7 @@ class AltitudeIndicator:
         self.background = self.background.convert_alpha()
         self.background_rect = self.background.get_rect()
         self.background_rect.midleft = self.position
-        self.background_color = pygame.Color(100, 100, 100, 200)
+        self.background_color = PFD_COLORS["panel_bg"]
 
         self.indicator_range = 500
         self.indicator_range2 = 1000
@@ -44,6 +44,8 @@ class AltitudeIndicator:
         self.marks_font_size = int(self.size // 15.5)
         self.marks_font_separation = int(self.size // 31.0) + 1
         self.command_font_size = int(self.size // 10.5)
+        self.label_font = pygame.font.SysFont("helvetica", int(self.size // 18.0), bold=True)
+        self.units_font = pygame.font.SysFont("helvetica", int(self.size // 23.0), bold=True)
         self.command_position = (
             self.background_rect.left + int(self.size // 100.0),
             self.background_rect.top - int(self.size // 9.0),
@@ -81,7 +83,7 @@ class AltitudeIndicator:
         self.digit12_pos = (self.box_size * 1.0, self.box_size * 0.5 - 3)
 
         ### command mark
-        self.command_mark_color = pygame.Color("#F000FF")
+        self.command_mark_color = PFD_COLORS["magenta"]
         self.command_mark_original = [
             (self.background_rect.left + self.box_size * 0.33, self.background_rect.centery - self.box_size / 2),
             (self.background_rect.left - self.box_size * 0.33, self.background_rect.centery - self.box_size / 2),
@@ -119,11 +121,11 @@ class AltitudeIndicator:
         thousands_value = altitude // 1000
         houndreds_value = altitude - thousands_value * 1000
 
-        font = pygame.font.SysFont("helvetica", size)
+        font = pygame.font.SysFont("helvetica", size, bold=True)
         thousands = font.render(f"{thousands_value:.0f}", True, color)
         thousands_rect = thousands.get_rect()
 
-        font = pygame.font.SysFont("helvetica", int(size * 0.8))
+        font = pygame.font.SysFont("helvetica", int(size * 0.8), bold=True)
         houndreds = font.render(f"{houndreds_value:03.0f}", True, color)
         houndreds_rect = houndreds.get_rect()
 
@@ -143,10 +145,10 @@ class AltitudeIndicator:
         for mark in quit_out_range(marks, self.bar_min_altitude, self.bar_max_altitude):
             incy = (self.altitude - mark) * self.altitude2heigth
             p1 = (0, self.vmid + incy)
-            mark_color = (255, 255, 255)
+            mark_color = PFD_COLORS["text_primary"]
             if mark <= 0:
                 mark = abs(mark)
-                mark_color = (255, 0, 0)
+                mark_color = PFD_COLORS["danger"]
             if mark % 1000 == 0:
                 p2 = (self.lines_length2, self.vmid + incy)
                 pygame.draw.line(self.background, mark_color, p1, p2, width=self.line_width4)
@@ -160,20 +162,20 @@ class AltitudeIndicator:
                 )
 
     def draw_digits_display(self) -> None:
-        pygame.draw.polygon(self.screen, (0, 0, 0), self.box_poly)
+        pygame.draw.polygon(self.screen, PFD_COLORS["panel_bg_dark"], self.box_poly)
 
         altitude_abs = self.altitude
-        digits_color = (255, 255, 255)
+        digits_color = PFD_COLORS["text_primary"]
         if self.altitude <= 0.0:
             altitude_abs = abs(self.altitude)
-            digits_color = (255, 0, 0)
+            digits_color = PFD_COLORS["danger"]
 
         digit2_value = get_digit(altitude_abs, 1)
         digit3_value = get_digit(altitude_abs, 2)
         digit4_value = get_digit(altitude_abs, 3)
         digit5_value = get_digit(altitude_abs, 4)
 
-        self.box_surface.fill((0, 0, 0))
+        self.box_surface.fill(PFD_COLORS["panel_bg_dark"])
 
         font = pygame.font.SysFont("helvetica", self.digit_font_size1)
 
@@ -209,7 +211,7 @@ class AltitudeIndicator:
 
         self.screen.blit(self.box_surface, self.box_surface_rect)
 
-        pygame.draw.polygon(self.screen, (255, 255, 255), self.box_poly, width=self.line_width3)
+        pygame.draw.polygon(self.screen, PFD_COLORS["text_primary"], self.box_poly, width=self.line_width3)
 
     def draw_command_mark(self) -> None:
         if self.bar_min_altitude < self.command < self.bar_max_altitude:
@@ -239,25 +241,36 @@ class AltitudeIndicator:
         # pygame.draw.line(self.screen, (255, 255, 255), self.border_line_h2[0], self.border_line_h2[1], width=self.line_width3)
         pygame.draw.line(
             self.screen,
-            (255, 255, 255),
+            PFD_COLORS["text_primary"],
             self.background_rect.topleft,
             self.background_rect.bottomleft,
             width=self.line_width3,
         )
         pygame.draw.line(
             self.screen,
-            (255, 255, 255),
+            PFD_COLORS["text_primary"],
             self.background_rect.topleft,
             self.background_rect.topright,
             width=self.line_width3,
         )
         pygame.draw.line(
             self.screen,
-            (255, 255, 255),
+            PFD_COLORS["text_primary"],
             self.background_rect.bottomleft,
             self.background_rect.bottomright,
             width=self.line_width3,
         )
+
+    def draw_label(self) -> None:
+        label = self.label_font.render("ALT", True, PFD_COLORS["text_dim"])
+        label_rect = label.get_rect()
+        label_rect.midtop = (self.background_rect.centerx, self.background_rect.top + self.size / 40)
+        self.screen.blit(label, label_rect)
+
+        units = self.units_font.render("FT", True, PFD_COLORS["text_dim"])
+        units_rect = units.get_rect()
+        units_rect.midbottom = (self.background_rect.centerx, self.background_rect.bottom - self.size / 40)
+        self.screen.blit(units, units_rect)
 
     def update(self, altitude: float, command: float = None):
         # self.altitude = np.clip(altitude, 0.0, None)
@@ -278,6 +291,7 @@ class AltitudeIndicator:
         self.screen.blit(self.background, self.background_rect)
         self.draw_border_lines()
         self.draw_digits_display()
+        self.draw_label()
         if not self.command is None:
             self.draw_command_mark()
         return self.render_rect

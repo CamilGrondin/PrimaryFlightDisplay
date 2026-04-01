@@ -1,7 +1,7 @@
 import numpy as np
 import pygame
 
-from .common import quit_out_range
+from .common import PFD_COLORS, quit_out_range
 
 
 class ArtificalHorizon:
@@ -19,9 +19,9 @@ class ArtificalHorizon:
         self.frame_rect = self.frame.get_rect()
         self.frame_rect.center = self.screen_rect.center
 
-        self.lines_color = pygame.Color("#FFFFFF")
-        self.sky_color = pygame.Color("#008FFF")
-        self.gnd_color = pygame.Color("#934100")
+        self.lines_color = PFD_COLORS["text_primary"]
+        self.sky_color = PFD_COLORS["sky"]
+        self.gnd_color = PFD_COLORS["ground"]
 
         self.lines_size = self.size / 2
         self.lines_10deg = np.delete(np.arange(-80.0, 80.0 + 10.0, 10.0), 8)
@@ -39,6 +39,7 @@ class ArtificalHorizon:
         self.line_width4 = int(1 + self.size // 100)
 
         self.marks_font = pygame.font.SysFont("helvetica", int(self.size // 16.5))
+        self.label_font = pygame.font.SysFont("helvetica", int(self.size // 25.0), bold=True)
 
         ### pre-compute all constant shapes
         self.build_constant_elements()
@@ -237,16 +238,16 @@ class ArtificalHorizon:
             pygame.draw.circle(self.screen, (255, 255, 255), line_center, mark_radius)
 
     def draw_roll_marks(self) -> None:
-        pygame.draw.polygon(self.screen, (255, 255, 255), self.roll_pointer_poly)
+        pygame.draw.polygon(self.screen, self.lines_color, self.roll_pointer_poly)
 
         for line in self.roll_small_marks_lines:
-            pygame.draw.line(self.screen, (255, 255, 255), line[0], line[1], width=self.line_width3)
+            pygame.draw.line(self.screen, self.lines_color, line[0], line[1], width=self.line_width3)
 
         for line in self.roll_big_marks_lines:
-            pygame.draw.line(self.screen, (255, 255, 255), line[0], line[1], width=self.line_width3)
+            pygame.draw.line(self.screen, self.lines_color, line[0], line[1], width=self.line_width3)
 
         pygame.draw.arc(
-            self.screen, (255, 255, 255), self.roll_arc_rect, np.deg2rad(30), np.deg2rad(150), width=self.line_width3
+            self.screen, self.lines_color, self.roll_arc_rect, np.deg2rad(30), np.deg2rad(150), width=self.line_width3
         )
 
         h1sin = self.roll_arc_radius * self.sin_roll
@@ -259,15 +260,21 @@ class ArtificalHorizon:
         p2 = (self.frame_rect.center[0] - h2sin, self.frame_rect.center[1] - h2cos)
         p2a = (p2[0] - wcos, p2[1] + wsin)
         p2b = (p2[0] + wcos, p2[1] - wsin)
-        pygame.draw.polygon(self.screen, (255, 255, 255), [p1, p2a, p2b])
+        pygame.draw.polygon(self.screen, self.lines_color, [p1, p2a, p2b])
 
     def draw_reference_marks(self) -> None:
-        pygame.draw.polygon(self.screen, (0, 0, 0), self.reference_central_poly)
-        pygame.draw.polygon(self.screen, (255, 255, 255), self.reference_central_poly, width=self.line_width2)
-        pygame.draw.polygon(self.screen, (0, 0, 0), self.reference_rigth_poly)
-        pygame.draw.polygon(self.screen, (255, 255, 255), self.reference_rigth_poly, width=self.line_width2)
-        pygame.draw.polygon(self.screen, (0, 0, 0), self.reference_left_poly)
-        pygame.draw.polygon(self.screen, (255, 255, 255), self.reference_left_poly, width=self.line_width2)
+        pygame.draw.polygon(self.screen, PFD_COLORS["panel_bg_dark"], self.reference_central_poly)
+        pygame.draw.polygon(self.screen, self.lines_color, self.reference_central_poly, width=self.line_width2)
+        pygame.draw.polygon(self.screen, PFD_COLORS["panel_bg_dark"], self.reference_rigth_poly)
+        pygame.draw.polygon(self.screen, self.lines_color, self.reference_rigth_poly, width=self.line_width2)
+        pygame.draw.polygon(self.screen, PFD_COLORS["panel_bg_dark"], self.reference_left_poly)
+        pygame.draw.polygon(self.screen, self.lines_color, self.reference_left_poly, width=self.line_width2)
+
+    def draw_label(self) -> None:
+        label = self.label_font.render("ATT", True, self.lines_color)
+        label_rect = label.get_rect()
+        label_rect.midtop = (self.frame_rect.centerx, self.frame_rect.top + self.size / 18)
+        self.screen.blit(label, label_rect)
 
     def update(self, roll: float, pitch: float) -> None:
         self.roll = np.clip(roll, -180.0, +180.0)

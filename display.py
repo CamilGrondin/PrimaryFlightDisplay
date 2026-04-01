@@ -16,7 +16,6 @@ class DisplayPFD:
         self.t0 = time.time()
 
     def update_display(self, airspeed, altitude, heading, vertical_speed, pitch, roll=0.0, course=None):
-        print("Updating PFD with new data...")
         t = time.time() - self.t0
         if course is None:
             course = heading
@@ -36,11 +35,6 @@ class DisplayPFD:
         self.PFD.update(state, t)
         self.PFD.draw()
         self.PFD.render()
-
-        print(
-            f"t={t:.2f}s fps={self.PFD.fps:.0f} Pitch={state.pitch:.2f}deg Roll={state.roll:.2f}deg Airspeed={state.airspeed:.2f}kt"
-            f" Vspeed={state.vspeed:.2f}ft/min Altitude={state.altitude:.2f}ft Heading={state.heading:.2f}deg"
-        )
 
 
 if __name__ == "__main__":

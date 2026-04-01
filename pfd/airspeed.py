@@ -8,7 +8,7 @@
 import numpy as np
 import pygame
 
-from .common import get_digit, quit_out_range
+from .common import PFD_COLORS, get_digit, quit_out_range
 
 
 class AirspeedIndicator:
@@ -25,7 +25,7 @@ class AirspeedIndicator:
         self.background = self.background.convert_alpha()
         self.background_rect = self.background.get_rect()
         self.background_rect.midright = self.position
-        self.background_color = pygame.Color(100, 100, 100, 200)
+        self.background_color = PFD_COLORS["panel_bg"]
 
         self.vmid = self.height / 2
         self.hmid = self.width / 2
@@ -42,6 +42,8 @@ class AirspeedIndicator:
         self.marks_font = pygame.font.SysFont("helvetica", int(self.size // 16.5))
         self.digits_font = pygame.font.SysFont("helvetica", int(self.size // 15.0))
         self.command_font = pygame.font.SysFont("helvetica", int(self.size // 10.5))
+        self.label_font = pygame.font.SysFont("helvetica", int(self.size // 18.0), bold=True)
+        self.units_font = pygame.font.SysFont("helvetica", int(self.size // 23.0), bold=True)
         self.command_separation = int(self.size // 100.0)
 
         ### pre-compute all constant shapes
@@ -75,7 +77,7 @@ class AirspeedIndicator:
         self.digit1_pos = (self.box_size * 0.75, self.box_size * 0.5 - 3)
 
         ### command mark
-        self.command_mark_color = pygame.Color("#F000FF")
+        self.command_mark_color = PFD_COLORS["magenta"]
         self.command_mark_original = [
             (self.background_rect.left + self.box_size * 2.33, self.background_rect.centery - self.box_size / 4),
             (self.background_rect.left + self.box_size * 1.67, self.background_rect.centery - self.box_size / 4),
@@ -109,9 +111,9 @@ class AirspeedIndicator:
             incy = (self.airspeed - mark) * self.airspeed2heigth
             p1 = (self.background_rect.size[0], self.vmid + incy)
             p2 = (self.background_rect.size[0] - self.lines_length, self.vmid + incy)
-            pygame.draw.line(self.background, (255, 255, 255), p1, p2, width=self.line_width2)
+            pygame.draw.line(self.background, PFD_COLORS["text_primary"], p1, p2, width=self.line_width2)
             if mark % 20 == 0:
-                airspeed_num = self.marks_font.render(f"{mark:.0f}", True, (255, 255, 255))
+                airspeed_num = self.marks_font.render(f"{mark:.0f}", True, PFD_COLORS["text_primary"])
                 airspeed_num_rect = airspeed_num.get_rect()
                 airspeed_num_rect.midright = (
                     self.background_rect.size[0] - self.lines_length * 1.5,
@@ -119,21 +121,38 @@ class AirspeedIndicator:
                 )
                 self.background.blit(airspeed_num, airspeed_num_rect)
 
+    def draw_speed_bands(self) -> None:
+        bands = [
+            (40, 80, (245, 245, 245)),
+            (80, 140, PFD_COLORS["green"]),
+            (140, 160, PFD_COLORS["warning"]),
+            (160, 220, PFD_COLORS["danger"]),
+        ]
+        x = self.background_rect.size[0] - self.width / 14
+        w = self.width / 16
+        for vmin, vmax, color in bands:
+            top = self.vmid + (self.airspeed - vmax) * self.airspeed2heigth
+            bottom = self.vmid + (self.airspeed - vmin) * self.airspeed2heigth
+            h = bottom - top
+            if h <= 0:
+                continue
+            pygame.draw.rect(self.background, color, pygame.Rect(x, top, w, h))
+
     def draw_digits_display(self) -> None:
-        pygame.draw.polygon(self.screen, (0, 0, 0), self.box_poly)
+        pygame.draw.polygon(self.screen, PFD_COLORS["panel_bg_dark"], self.box_poly)
 
         digit1_value = get_digit(self.airspeed, 0)
         digit2_value = get_digit(self.airspeed, 1)
         digit3_value = get_digit(self.airspeed, 2)
 
-        self.box_surface.fill((0, 0, 0))
+        self.box_surface.fill(PFD_COLORS["panel_bg_dark"])
 
-        digit3 = self.digits_font.render(f"{digit3_value:.0f}", True, (255, 255, 255))
+        digit3 = self.digits_font.render(f"{digit3_value:.0f}", True, PFD_COLORS["text_primary"])
         digit3_rect = digit3.get_rect()
         digit3_rect.center = self.digit3_pos
         self.box_surface.blit(digit3, digit3_rect)
 
-        digit2 = self.digits_font.render(f"{digit2_value:.0f}", True, (255, 255, 255))
+        digit2 = self.digits_font.render(f"{digit2_value:.0f}", True, PFD_COLORS["text_primary"])
         digit2_rect = digit2.get_rect()
         digit2_rect.center = self.digit2_pos
         self.box_surface.blit(digit2, digit2_rect)
@@ -145,14 +164,14 @@ class AirspeedIndicator:
                 num += 10
             if num > 9:
                 num -= 10
-            digit1 = self.digits_font.render(f"{num:.0f}", True, (255, 255, 255))
+            digit1 = self.digits_font.render(f"{num:.0f}", True, PFD_COLORS["text_primary"])
             digit1_rect = digit1.get_rect()
             digit1_rect.center = (self.digit1_pos[0], self.box_size * (0.5 + incy) - 3)
             self.box_surface.blit(digit1, digit1_rect)
 
         self.screen.blit(self.box_surface, self.box_surface_rect)
 
-        pygame.draw.polygon(self.screen, (255, 255, 255), self.box_poly, width=self.line_width3)
+        pygame.draw.polygon(self.screen, PFD_COLORS["text_primary"], self.box_poly, width=self.line_width3)
 
     def draw_command_mark(self):
         if self.bar_min_airspeed < self.command < self.bar_max_airspeed:
@@ -178,25 +197,36 @@ class AirspeedIndicator:
         # pygame.draw.line(self.screen, (255, 255, 255), self.border_line_h2[0], self.border_line_h2[1], width=self.line_width3)
         pygame.draw.line(
             self.screen,
-            (255, 255, 255),
+            PFD_COLORS["text_primary"],
             self.background_rect.topright,
             self.background_rect.bottomright,
             width=self.line_width3,
         )
         pygame.draw.line(
             self.screen,
-            (255, 255, 255),
+            PFD_COLORS["text_primary"],
             self.background_rect.topleft,
             self.background_rect.topright,
             width=self.line_width3,
         )
         pygame.draw.line(
             self.screen,
-            (255, 255, 255),
+            PFD_COLORS["text_primary"],
             self.background_rect.bottomleft,
             self.background_rect.bottomright,
             width=self.line_width3,
         )
+
+    def draw_label(self) -> None:
+        label = self.label_font.render("SPD", True, PFD_COLORS["text_dim"])
+        label_rect = label.get_rect()
+        label_rect.midtop = (self.background_rect.centerx, self.background_rect.top + self.size / 40)
+        self.screen.blit(label, label_rect)
+
+        units = self.units_font.render("KT", True, PFD_COLORS["text_dim"])
+        units_rect = units.get_rect()
+        units_rect.midbottom = (self.background_rect.centerx, self.background_rect.bottom - self.size / 40)
+        self.screen.blit(units, units_rect)
 
     def update(self, airspeed: float, command: float = None) -> None:
         self.airspeed = np.clip(airspeed, 0.0, None)
@@ -212,9 +242,11 @@ class AirspeedIndicator:
     def draw(self) -> pygame.Rect:
         self.background.fill(self.background_color)
         self.draw_lines()
+        self.draw_speed_bands()
         self.screen.blit(self.background, self.background_rect)
         self.draw_border_lines()
         self.draw_digits_display()
+        self.draw_label()
         if not self.command is None:
             self.draw_command_mark()
         return self.render_rect

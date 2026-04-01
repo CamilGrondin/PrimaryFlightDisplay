@@ -8,7 +8,7 @@
 import numpy as np
 import pygame
 
-from .common import clip_angle_180, clip_angle_360, diff_angle_180
+from .common import PFD_COLORS, clip_angle_180, clip_angle_360, diff_angle_180
 
 
 class HeadingIndicator:
@@ -28,7 +28,7 @@ class HeadingIndicator:
         self.background = self.background.convert_alpha()
         self.background_rect = self.background.get_rect()
         self.background_rect.midtop = self.position
-        self.background_color = pygame.Color(100, 100, 100, 200)
+        self.background_color = PFD_COLORS["panel_bg"]
 
         self.indicator_range = 25
         self.indicator_range2 = 50
@@ -42,7 +42,9 @@ class HeadingIndicator:
         self.line_width3 = int(1 + self.size // 200)
 
         self.marks_font = pygame.font.SysFont("helvetica", int(self.size // 16.5))
+        self.cardinal_font = pygame.font.SysFont("helvetica", int(self.size // 14.0), bold=True)
         self.command_font = pygame.font.SysFont("helvetica", int(self.size // 10.5))
+        self.label_font = pygame.font.SysFont("helvetica", int(self.size // 23.0), bold=True)
         self.command_separation = int(self.size // 50.0)
 
         ### pre-compute all constant shapes
@@ -57,20 +59,20 @@ class HeadingIndicator:
         self.heading_values_txt = {}
         for heading_value in np.arange(10, 360 + 10, 10):
             if heading_value == 360.0:
-                heading_txt = font.render("N", True, (255, 255, 255))
+                heading_txt = self.cardinal_font.render("N", True, PFD_COLORS["text_primary"])
             elif heading_value == 90.0:
-                heading_txt = font.render("E", True, (255, 255, 255))
+                heading_txt = self.cardinal_font.render("E", True, PFD_COLORS["text_primary"])
             elif heading_value == 180.0:
-                heading_txt = font.render("S", True, (255, 255, 255))
+                heading_txt = self.cardinal_font.render("S", True, PFD_COLORS["text_primary"])
             elif heading_value == 270.0:
-                heading_txt = font.render("W", True, (255, 255, 255))
+                heading_txt = self.cardinal_font.render("W", True, PFD_COLORS["text_primary"])
             else:
-                heading_txt = font.render(f"{heading_value:.0f}", True, (255, 255, 255))
+                heading_txt = font.render(f"{heading_value:.0f}", True, PFD_COLORS["text_primary"])
             heading_txt_rect = heading_txt.get_rect()
             self.heading_values_txt[heading_value] = (heading_txt, heading_txt_rect)
 
         ### course mark
-        self.course_mark_color = pygame.Color("#23FF00")
+        self.course_mark_color = PFD_COLORS["green"]
         self.course_mark_original = [
             (self.hmid - self.height / 6, self.height / 3),
             (self.hmid, 0.0),
@@ -78,7 +80,7 @@ class HeadingIndicator:
         ]
 
         ### command mark
-        self.command_mark_color = pygame.Color("#F000FF")
+        self.command_mark_color = PFD_COLORS["magenta"]
         self.command_mark_original = [
             (self.background_rect.centerx - self.height / 3, self.background_rect.top),
             (self.background_rect.centerx - self.height / 3, self.background_rect.top - self.height / 4),
@@ -124,7 +126,7 @@ class HeadingIndicator:
             else:
                 p2 = (self.hmid - incx, self.lines_length)
 
-            pygame.draw.line(self.background, (255, 255, 255), p1, p2, width=self.line_width2)
+            pygame.draw.line(self.background, PFD_COLORS["text_primary"], p1, p2, width=self.line_width2)
 
     def draw_course_mark(self) -> None:
         ang_diff = diff_angle_180(self.heading, self.course)
@@ -146,18 +148,24 @@ class HeadingIndicator:
         self.screen.blit(command_value, command_value_rect)
 
     def draw_central_mark(self) -> None:
-        pygame.draw.polygon(self.screen, (255, 255, 255), self.central_mark, width=self.line_width3)
+        pygame.draw.polygon(self.screen, PFD_COLORS["text_primary"], self.central_mark, width=self.line_width3)
 
     def draw_border_lines(self) -> None:
         pygame.draw.line(
-            self.screen, (255, 255, 255), self.border_line_h[0], self.border_line_h[1], width=self.line_width3
+            self.screen, PFD_COLORS["text_primary"], self.border_line_h[0], self.border_line_h[1], width=self.line_width3
         )
         pygame.draw.line(
-            self.screen, (255, 255, 255), self.border_line_v1[0], self.border_line_v1[1], width=self.line_width3
+            self.screen, PFD_COLORS["text_primary"], self.border_line_v1[0], self.border_line_v1[1], width=self.line_width3
         )
         pygame.draw.line(
-            self.screen, (255, 255, 255), self.border_line_v2[0], self.border_line_v2[1], width=self.line_width3
+            self.screen, PFD_COLORS["text_primary"], self.border_line_v2[0], self.border_line_v2[1], width=self.line_width3
         )
+
+    def draw_label(self) -> None:
+        label = self.label_font.render("HDG", True, PFD_COLORS["text_dim"])
+        label_rect = label.get_rect()
+        label_rect.midbottom = (self.background_rect.centerx, self.background_rect.bottom - self.height / 8)
+        self.background.blit(label, label_rect)
 
     def update(self, heading: float, course: float, command: float = None) -> None:
         self.heading = clip_angle_180(heading)
@@ -174,6 +182,7 @@ class HeadingIndicator:
     def draw(self) -> pygame.Rect:
         self.background.fill(self.background_color)
         self.draw_lines()
+        self.draw_label()
         self.draw_course_mark()
         self.screen.blit(self.background, self.background_rect)
         self.draw_border_lines()

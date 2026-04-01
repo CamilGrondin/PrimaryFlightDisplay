@@ -1,5 +1,3 @@
-import argparse
-
 from display import DisplayPFD
 from modes import (
     JoystickManualSource,
@@ -10,39 +8,61 @@ from modes import (
     XPlaneRealtimeSource,
 )
 
-# Create an instance of the DisplayPFD class
-pfd = DisplayPFD()
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Primary Flight Display mode selector")
-    parser.add_argument("--mode", type=int, choices=[1, 2, 3], required=True)
-    parser.add_argument("--xplane-ip", default="127.0.0.1")
-    parser.add_argument("--xplane-port", type=int, default=49000)
-    parser.add_argument("--msp-port", default="/dev/tty.usbserial")
-    parser.add_argument("--msp-baud", type=int, default=115200)
-    parser.add_argument("--joystick-name", default="X52")
-    return parser
+def prompt_text(label: str, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default is not None else ""
+    value = input(f"{label}{suffix}: ").strip()
+    if value:
+        return value
+    if default is not None:
+        return default
+    raise ValueError(f"{label} is required")
 
 
-def start_source(args: argparse.Namespace):
-    if args.mode == MODE_JOYSTICK:
-        source = JoystickManualSource(joystick_name_hint=args.joystick_name)
+def prompt_int(label: str, default: int | None = None) -> int:
+    while True:
+        value = prompt_text(label, str(default) if default is not None else None)
+        try:
+            return int(value)
+        except ValueError:
+            print("Please enter a valid integer.")
+
+
+def choose_mode() -> int:
+    print("Primary Flight Display")
+    print("1 - Manual control via joystick Saitek X52")
+    print("2 - Real-time data from X-Plane (UDP)")
+    print("3 - IMU data from flight controller via MSP")
+    while True:
+        mode = prompt_int("Choose mode", 2)
+        if mode in (MODE_JOYSTICK, MODE_XPLANE, MODE_MSP):
+            return mode
+        print("Mode must be 1, 2, or 3.")
+
+
+def build_source(mode: int):
+    if mode == MODE_JOYSTICK:
+        joystick_name = prompt_text("Joystick name hint", "X52")
+        source = JoystickManualSource(joystick_name_hint=joystick_name)
         print("Mode 1 active: joystick manual control")
         return source
 
-    if args.mode == MODE_XPLANE:
-        source = XPlaneRealtimeSource(ip=args.xplane_ip, port=args.xplane_port)
+    if mode == MODE_XPLANE:
+        xplane_ip = prompt_text("X-Plane IP address", "127.0.0.1")
+        xplane_port = prompt_int("X-Plane UDP port", 49000)
+        source = XPlaneRealtimeSource(ip=xplane_ip, port=xplane_port)
         source.start()
         print("Mode 2 active: X-Plane UDP real-time")
         return source
 
-    source = MSPRealtimeSource(port=args.msp_port, baudrate=args.msp_baud)
+    msp_port = prompt_text("MSP serial port", "/dev/tty.usbserial")
+    msp_baud = prompt_int("MSP baud rate", 115200)
+    source = MSPRealtimeSource(port=msp_port, baudrate=msp_baud)
     source.start()
     print("Mode 3 active: MSP IMU real-time")
     return source
 
 
-def run_pfd_loop(source, mode: int) -> None:
+def run_pfd_loop(pfd: DisplayPFD, source, mode: int) -> None:
     state = {
         "airspeed": 0.0,
         "altitude": 0.0,
@@ -74,14 +94,19 @@ def run_pfd_loop(source, mode: int) -> None:
         )
 
 
-if __name__ == "__main__":
-    cli_args = build_parser().parse_args()
-    data_source = start_source(cli_args)
+def main() -> None:
+    mode = choose_mode()
+    pfd = DisplayPFD()
+    data_source = build_source(mode)
 
     try:
-        run_pfd_loop(data_source, cli_args.mode)
+        run_pfd_loop(pfd, data_source, mode)
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
     finally:
         if hasattr(data_source, "stop"):
             data_source.stop()
+
+
+if __name__ == "__main__":
+    main()

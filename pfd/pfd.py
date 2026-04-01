@@ -18,6 +18,7 @@ from .altimeter import AltitudeIndicator
 from .altimeter_little import AltitudeIndicatorLittle
 from .attitude import ArtificalHorizon
 from .heading import HeadingIndicator
+from .navrose import NavigationRoseIndicator
 from .vspeed import VerticalSpeedIndicator
 from .vspeed_little import VerticalSpeedIndicatoLittle
 
@@ -76,7 +77,12 @@ class PrimaryFlightDisplay:
         self.heading_indicator = HeadingIndicator(
             self.screen,
             size=self.size / 2,
-            position=(self.screen_rect.center[0], self.screen_rect.center[1] + self.unit * 5),
+            position=(self.screen_rect.center[0], self.screen_rect.center[1] + self.unit * 5.55),
+        )
+        self.nav_rose_indicator = NavigationRoseIndicator(
+            self.screen,
+            size=self.size / 3.8,
+            position=(self.screen_rect.center[0], self.screen_rect.center[1] + self.unit * 3.75),
         )
 
         self.render_rects = [self.screen_rect]
@@ -145,6 +151,7 @@ class PrimaryFlightDisplay:
         self.altitude_indicator.update(state.altitude, state.altitude_cmd)
         self.vspeed_indicator.update(state.vspeed)
         self.heading_indicator.update(state.heading, state.course, state.heading_cmd)
+        self.nav_rose_indicator.update(state.heading, state.course, state.heading_cmd)
         self.real_time = real_time
         self.sim_time = sim_time
 
@@ -155,6 +162,7 @@ class PrimaryFlightDisplay:
         render_rects.append(self.altitude_indicator.draw())
         render_rects.append(self.vspeed_indicator.draw())
         render_rects.append(self.heading_indicator.draw())
+        render_rects.append(self.nav_rose_indicator.draw())
         render_rects.append(self.draw_fps())
         self.real_time = 0.0
         render_rects.append(self.draw_real_time())
@@ -185,6 +193,7 @@ class PrimaryFlightDisplay:
         self.airspeed_indicator.draw()
         self.vspeed_indicator.draw()
         self.altitude_indicator.draw()
+        self.nav_rose_indicator.draw()
         self.heading_indicator.draw()
         if debug:
             self.artifical_horizon.draw_aux_axis()

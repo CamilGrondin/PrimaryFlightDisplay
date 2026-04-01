@@ -8,6 +8,8 @@
 import numpy as np
 import pygame
 
+from .common import PFD_COLORS
+
 
 class VerticalSpeedIndicator:
     def __init__(self, screen: pygame.Surface, *args, **kwargs) -> None:
@@ -26,7 +28,7 @@ class VerticalSpeedIndicator:
         self.background = self.background.convert_alpha()
         self.background_rect = self.background.get_rect()
         self.background_rect.midleft = self.position
-        self.background_color = pygame.Color(100, 100, 100, 200)
+        self.background_color = PFD_COLORS["panel_bg"]
 
         self.long_lines_length = self.width / 5
         self.short_lines_length = self.long_lines_length / 2
@@ -48,6 +50,8 @@ class VerticalSpeedIndicator:
         self.line_width4 = int(1 + self.size // 100)
 
         self.marks_font = pygame.font.SysFont("helvetica", int(self.size // 16.0))
+        self.label_font = pygame.font.SysFont("helvetica", int(self.size // 20.0), bold=True)
+        self.units_font = pygame.font.SysFont("helvetica", int(self.size // 26.0), bold=True)
 
         self.build_lines()
 
@@ -59,7 +63,7 @@ class VerticalSpeedIndicator:
         for num in self.long_lines_nums:
             posy = self.vmid - self.vspeed2heigth(num)
             self.long_lines.append([(self.width / 5, posy), (self.width / 5 + self.long_lines_length, posy)])
-            num_txt = self.marks_font.render(f"{np.abs(num):.0f}", True, (255, 255, 255))
+            num_txt = self.marks_font.render(f"{np.abs(num):.0f}", True, PFD_COLORS["text_primary"])
             num_txt_rect = num_txt.get_rect()
             num_txt_rect.midleft = (2, posy)
             self.nums_txt.append((num_txt, num_txt_rect))
@@ -70,21 +74,40 @@ class VerticalSpeedIndicator:
             self.short_lines.append([(self.width / 5, posy), (self.width / 5 + self.short_lines_length, posy)])
 
     def draw_lines(self):
+        for yy in np.arange(self.height / 8, self.height, self.height / 8):
+            pygame.draw.line(
+                self.background,
+                PFD_COLORS["text_dim"],
+                (self.width / 5, yy),
+                (self.width, yy),
+                width=self.line_width1,
+            )
         for kk, line in enumerate(self.long_lines):
-            pygame.draw.line(self.background, (255, 255, 255), line[0], line[1], width=self.line_width3)
+            pygame.draw.line(self.background, PFD_COLORS["text_primary"], line[0], line[1], width=self.line_width3)
             self.background.blit(self.nums_txt[kk][0], self.nums_txt[kk][1])
         for line in self.short_lines:
-            pygame.draw.line(self.background, (255, 255, 255), line[0], line[1], width=self.line_width3)
+            pygame.draw.line(self.background, PFD_COLORS["text_primary"], line[0], line[1], width=self.line_width3)
 
     def draw_hand(self):
         posy = self.vmid - self.vspeed2heigth(self.vspeed)
         pygame.draw.line(
             self.background,
-            (255, 255, 255),
+            PFD_COLORS["text_primary"],
             (self.width, self.vmid),
             (self.long_lines[0][1][0], posy),
             width=self.line_width4,
         )
+
+    def draw_label(self) -> None:
+        label = self.label_font.render("VSI", True, PFD_COLORS["text_dim"])
+        label_rect = label.get_rect()
+        label_rect.midtop = (self.background_rect.centerx, self.background_rect.top + self.height / 30)
+        self.screen.blit(label, label_rect)
+
+        units = self.units_font.render("FT MIN", True, PFD_COLORS["text_dim"])
+        units_rect = units.get_rect()
+        units_rect.midbottom = (self.background_rect.centerx, self.background_rect.bottom - self.height / 30)
+        self.screen.blit(units, units_rect)
 
     def update(self, vspeed: float):
         self.vspeed = vspeed / 1000.0
