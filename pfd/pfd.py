@@ -16,7 +16,7 @@ from .airspeed_little import AirspeedIndicatorLittle
 from .altimeter import AltitudeIndicator
 from .altimeter_little import AltitudeIndicatorLittle
 from .attitude import ArtificalHorizon
-from .navrose import NavigationRoseIndicator
+from .heading import HeadingIndicator
 from .topbar import TopBarIndicator
 from .vspeed import VerticalSpeedIndicator
 from .vspeed_little import VerticalSpeedIndicatoLittle
@@ -91,10 +91,10 @@ class PrimaryFlightDisplay:
             size=self.size / 2.5,
             position=(self.altitude_indicator.background_rect.right + self.size / 100, self.screen_rect.center[1]),
         )
-        self.nav_rose_indicator = NavigationRoseIndicator(
+        self.heading_indicator = HeadingIndicator(
             self.screen,
-            size=self.size / 4.1,
-            position=(self.screen_rect.center[0], self.screen_rect.center[1]),
+            size=self.size / 2,
+            position=(self.screen_rect.center[0], self.screen_rect.center[1] + self.unit * 5.55),
         )
 
         self.render_rects = [self.screen_rect]
@@ -145,7 +145,7 @@ class PrimaryFlightDisplay:
         self.airspeed_indicator.update(state.airspeed, state.airspeed_cmd)
         self.altitude_indicator.update(state.altitude, state.altitude_cmd)
         self.vspeed_indicator.update(state.vspeed)
-        self.nav_rose_indicator.update(state.heading, state.course, state.heading_cmd)
+        self.heading_indicator.update(state.heading, state.course, state.heading_cmd)
 
     def get_render_rects(self) -> list:
         render_rects = []
@@ -154,7 +154,7 @@ class PrimaryFlightDisplay:
         render_rects.append(self.airspeed_indicator.draw())
         render_rects.append(self.altitude_indicator.draw())
         render_rects.append(self.vspeed_indicator.draw())
-        render_rects.append(self.nav_rose_indicator.draw())
+        render_rects.append(self.heading_indicator.draw())
         return render_rects
 
     def draw_render_rects(self) -> None:
@@ -183,7 +183,7 @@ class PrimaryFlightDisplay:
         self.airspeed_indicator.draw()
         self.vspeed_indicator.draw()
         self.altitude_indicator.draw()
-        self.nav_rose_indicator.draw()
+        self.heading_indicator.draw()
         if debug:
             self.artifical_horizon.draw_aux_axis()
 

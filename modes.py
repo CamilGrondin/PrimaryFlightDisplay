@@ -94,7 +94,8 @@ class JoystickManualSource:
         self.joystick = selected
         self.telemetry = Telemetry(airspeed=120.0, altitude=1500.0, heading=0.0, tas=120.0)
         self.last_t = time.monotonic()
-        self.yaw_deadzone = 0.08
+        self.bank_deadzone_deg = 1.5
+        self.max_turn_rate_deg_s = 12.0
         self.speed_tau = 1.4
         self.max_accel_kts_s = 18.0
 
@@ -115,19 +116,11 @@ class JoystickManualSource:
         roll_axis = self._axis(0)
         pitch_axis = self._axis(1)
         throttle_axis = -self._axis(2)
-        yaw_axis = self._axis(3)
 
         throttle = (throttle_axis + 1.0) / 2.0
 
         self.telemetry.roll = 60.0 * roll_axis
         self.telemetry.pitch = 30.0 * pitch_axis
-
-        if abs(yaw_axis) < self.yaw_deadzone:
-            yaw_rate = 0.0
-        else:
-            yaw_input = (abs(yaw_axis) - self.yaw_deadzone) / (1.0 - self.yaw_deadzone)
-            yaw_rate = math.copysign(yaw_input, yaw_axis) * 45.0
-        self.telemetry.heading = _normalize_heading(self.telemetry.heading + yaw_rate * dt)
 
         target_airspeed = 60.0 + 280.0 * throttle
         speed_alpha = min(1.0, dt / self.speed_tau)
@@ -137,6 +130,15 @@ class JoystickManualSource:
         speed_step = max(-max_step, min(max_step, speed_step))
         self.telemetry.airspeed += speed_step
         self.telemetry.tas = self.telemetry.airspeed
+
+        bank_deg = self.telemetry.roll
+        if abs(bank_deg) < self.bank_deadzone_deg:
+            turn_rate_deg_s = 0.0
+        else:
+            speed_ms = max(self.telemetry.tas * 0.514444, 15.0)
+            turn_rate_deg_s = math.degrees(9.80665 * math.tan(math.radians(bank_deg)) / speed_ms)
+            turn_rate_deg_s = max(-self.max_turn_rate_deg_s, min(self.max_turn_rate_deg_s, turn_rate_deg_s))
+        self.telemetry.heading = _normalize_heading(self.telemetry.heading + turn_rate_deg_s * dt)
         self.telemetry.course = self.telemetry.heading
 
         speed_fts = self.telemetry.tas * 1.6878098571
