@@ -250,12 +250,14 @@ class ArtificalHorizon:
             self.screen, self.lines_color, self.roll_arc_rect, np.deg2rad(30), np.deg2rad(150), width=self.line_width3
         )
 
-        h1sin = self.roll_arc_radius * self.sin_roll
-        h1cos = self.roll_arc_radius * self.cos_roll
-        h2sin = (self.roll_arc_radius - self.roll_pointer_height) * self.sin_roll
-        h2cos = (self.roll_arc_radius - self.roll_pointer_height) * self.cos_roll
-        wsin = self.roll_pointer_width * self.sin_roll
-        wcos = self.roll_pointer_width * self.cos_roll
+        pointer_sin = -self.sin_roll
+        pointer_cos = self.cos_roll
+        h1sin = self.roll_arc_radius * pointer_sin
+        h1cos = self.roll_arc_radius * pointer_cos
+        h2sin = (self.roll_arc_radius - self.roll_pointer_height) * pointer_sin
+        h2cos = (self.roll_arc_radius - self.roll_pointer_height) * pointer_cos
+        wsin = self.roll_pointer_width * pointer_sin
+        wcos = self.roll_pointer_width * pointer_cos
         p1 = (self.frame_rect.center[0] - h1sin, self.frame_rect.center[1] - h1cos)
         p2 = (self.frame_rect.center[0] - h2sin, self.frame_rect.center[1] - h2cos)
         p2a = (p2[0] - wcos, p2[1] + wsin)

@@ -94,6 +94,9 @@ class JoystickManualSource:
         self.joystick = selected
         self.telemetry = Telemetry(airspeed=120.0, altitude=1500.0, heading=0.0, tas=120.0)
         self.last_t = time.monotonic()
+        self.yaw_deadzone = 0.08
+        self.speed_tau = 1.4
+        self.max_accel_kts_s = 18.0
 
         print("Manual mode joystick: " + self.joystick.get_name())
 
@@ -110,7 +113,7 @@ class JoystickManualSource:
         self.last_t = now
 
         roll_axis = self._axis(0)
-        pitch_axis = -self._axis(1)
+        pitch_axis = self._axis(1)
         throttle_axis = -self._axis(2)
         yaw_axis = self._axis(3)
 
@@ -118,14 +121,27 @@ class JoystickManualSource:
 
         self.telemetry.roll = 60.0 * roll_axis
         self.telemetry.pitch = 30.0 * pitch_axis
-        self.telemetry.vertical_speed = 2500.0 * pitch_axis
-        self.telemetry.altitude = max(0.0, self.telemetry.altitude + self.telemetry.vertical_speed * dt / 60.0)
-        self.telemetry.heading = _normalize_heading(self.telemetry.heading + yaw_axis * 45.0 * dt)
+
+        if abs(yaw_axis) < self.yaw_deadzone:
+            yaw_rate = 0.0
+        else:
+            yaw_input = (abs(yaw_axis) - self.yaw_deadzone) / (1.0 - self.yaw_deadzone)
+            yaw_rate = math.copysign(yaw_input, yaw_axis) * 45.0
+        self.telemetry.heading = _normalize_heading(self.telemetry.heading + yaw_rate * dt)
 
         target_airspeed = 60.0 + 280.0 * throttle
-        self.telemetry.airspeed += (target_airspeed - self.telemetry.airspeed) * min(1.0, 2.0 * dt)
+        speed_alpha = min(1.0, dt / self.speed_tau)
+        smoothed_target = self.telemetry.airspeed + (target_airspeed - self.telemetry.airspeed) * speed_alpha
+        speed_step = smoothed_target - self.telemetry.airspeed
+        max_step = self.max_accel_kts_s * dt
+        speed_step = max(-max_step, min(max_step, speed_step))
+        self.telemetry.airspeed += speed_step
         self.telemetry.tas = self.telemetry.airspeed
         self.telemetry.course = self.telemetry.heading
+
+        speed_fts = self.telemetry.tas * 1.6878098571
+        self.telemetry.vertical_speed = speed_fts * math.sin(math.radians(self.telemetry.pitch)) * 60.0
+        self.telemetry.altitude = max(0.0, self.telemetry.altitude + (self.telemetry.vertical_speed / 60.0) * dt)
 
         self.telemetry.ap_vs = abs(self.telemetry.vertical_speed) > 300.0
         self.telemetry.bug_heading = _normalize_heading(self.telemetry.heading + 8.0)

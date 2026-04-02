@@ -178,14 +178,14 @@ class PrimaryFlightDisplay:
         self.screen.fill((0, 0, 0))
         self.top_bar_indicator.draw()
         self.artifical_horizon.draw()
+        if self.masked:
+            self.screen.blit(self.ah_screen, self.ah_screen_rect)
         self.airspeed_indicator.draw()
         self.vspeed_indicator.draw()
         self.altitude_indicator.draw()
         self.nav_rose_indicator.draw()
         if debug:
             self.artifical_horizon.draw_aux_axis()
-        if self.masked:
-            self.screen.blit(self.ah_screen, self.ah_screen_rect)
 
     def render(self):
         ### pygame event handler
