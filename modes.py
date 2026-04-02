@@ -31,7 +31,20 @@ class Telemetry:
     pitch: float = 0.0
     roll: float = 0.0
 
-    def as_dict(self) -> Dict[str, float]:
+    nav1_freq: float = 111.70
+    nav2_freq: float = 111.70
+    com1_freq: float = 121.800
+    com2_freq: float = 121.800
+
+    ap_gps: bool = True
+    ap_ap: bool = True
+    ap_alt: bool = True
+    ap_vs: bool = False
+
+    bug_heading: float = 0.0
+    bug_bearing: float = 0.0
+
+    def as_dict(self) -> Dict[str, float | bool]:
         return {
             "airspeed": self.airspeed,
             "altitude": self.altitude,
@@ -41,6 +54,16 @@ class Telemetry:
             "course": self.course,
             "pitch": self.pitch,
             "roll": self.roll,
+            "nav1_freq": self.nav1_freq,
+            "nav2_freq": self.nav2_freq,
+            "com1_freq": self.com1_freq,
+            "com2_freq": self.com2_freq,
+            "ap_gps": self.ap_gps,
+            "ap_ap": self.ap_ap,
+            "ap_alt": self.ap_alt,
+            "ap_vs": self.ap_vs,
+            "bug_heading": self.bug_heading,
+            "bug_bearing": self.bug_bearing,
         }
 
 
@@ -79,7 +102,7 @@ class JoystickManualSource:
             return default
         return float(self.joystick.get_axis(index))
 
-    def poll(self) -> Dict[str, float]:
+    def poll(self) -> Dict[str, float | bool]:
         pygame.event.pump()
 
         now = time.monotonic()
@@ -88,7 +111,7 @@ class JoystickManualSource:
 
         roll_axis = self._axis(0)
         pitch_axis = -self._axis(1)
-        throttle_axis = -self._axis(2)  # [-1..1], invert for intuitive push=more power
+        throttle_axis = -self._axis(2)
         yaw_axis = self._axis(3)
 
         throttle = (throttle_axis + 1.0) / 2.0
@@ -103,6 +126,10 @@ class JoystickManualSource:
         self.telemetry.airspeed += (target_airspeed - self.telemetry.airspeed) * min(1.0, 2.0 * dt)
         self.telemetry.tas = self.telemetry.airspeed
         self.telemetry.course = self.telemetry.heading
+
+        self.telemetry.ap_vs = abs(self.telemetry.vertical_speed) > 300.0
+        self.telemetry.bug_heading = _normalize_heading(self.telemetry.heading + 8.0)
+        self.telemetry.bug_bearing = _normalize_heading(self.telemetry.course + 95.0)
 
         return self.telemetry.as_dict()
 
@@ -136,16 +163,32 @@ class XPlaneRealtimeSource:
             if self.error_queue.empty():
                 self.error_queue.put(exc)
 
-    def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float]]:
+    def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float | bool]]:
         if not self.error_queue.empty():
             raise RuntimeError("X-Plane source stopped: " + str(self.error_queue.get()))
         try:
-            return self.data_queue.get(timeout=timeout)
+            data = self.data_queue.get(timeout=timeout)
         except queue.Empty:
             return None
 
+        heading = _normalize_heading(float(data.get("heading", 0.0)))
+        course = _normalize_heading(float(data.get("course", heading)))
+        vertical_speed = float(data.get("vertical_speed", 0.0))
+
+        enriched = dict(data)
+        enriched.setdefault("nav1_freq", 111.70)
+        enriched.setdefault("nav2_freq", 111.70)
+        enriched.setdefault("com1_freq", 121.800)
+        enriched.setdefault("com2_freq", 121.800)
+        enriched.setdefault("ap_gps", True)
+        enriched.setdefault("ap_ap", True)
+        enriched.setdefault("ap_alt", True)
+        enriched.setdefault("ap_vs", abs(vertical_speed) > 200.0)
+        enriched.setdefault("bug_heading", _normalize_heading(heading + 8.0))
+        enriched.setdefault("bug_bearing", _normalize_heading(course + 95.0))
+        return enriched
+
     def stop(self) -> None:
-        # Simulator handles socket close on its own path; thread is daemon.
         pass
 
 
@@ -261,10 +304,13 @@ class MSPRealtimeSource:
                     telemetry.altitude = float(est_alt_cm) / 30.48
                     telemetry.vertical_speed = float(vario_cms) * 1.96850394
 
-                # MSP does not provide airspeed directly on most FCs.
                 synthetic_airspeed = 80.0 + min(80.0, abs(telemetry.vertical_speed) / 40.0)
                 telemetry.airspeed = synthetic_airspeed
                 telemetry.tas = synthetic_airspeed
+
+                telemetry.ap_vs = abs(telemetry.vertical_speed) > 300.0
+                telemetry.bug_heading = _normalize_heading(telemetry.heading + 8.0)
+                telemetry.bug_bearing = _normalize_heading(telemetry.course + 95.0)
 
                 if self.data_queue.full():
                     try:
@@ -281,7 +327,7 @@ class MSPRealtimeSource:
             if client is not None:
                 client.close()
 
-    def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float]]:
+    def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float | bool]]:
         if not self.error_queue.empty():
             raise RuntimeError("MSP source stopped: " + str(self.error_queue.get()))
         try:

@@ -21,7 +21,7 @@ class NavigationRoseIndicator:
         self.line_width2 = max(1, int(self.size // 120))
         self.line_width3 = max(1, int(self.size // 80))
 
-        self.marks_font = pygame.font.SysFont("helvetica", int(self.size // 14.0), bold=True)
+        self.marks_font = pygame.font.SysFont("helvetica", int(self.size // 12.8), bold=True)
         self.small_font = pygame.font.SysFont("helvetica", int(self.size // 18.0), bold=True)
 
         self.update(0.0, 0.0, 0.0)
@@ -59,7 +59,7 @@ class NavigationRoseIndicator:
                     label = f"{int(mark / 10):02d}"
                 txt = self.marks_font.render(label, True, PFD_COLORS["text_primary"])
                 txt_rect = txt.get_rect()
-                txt_rect.center = self._polar_point(center, self.radius * 0.62, relative)
+                txt_rect.center = self._polar_point(center, self.radius * 0.60, relative)
                 self.surface.blit(txt, txt_rect)
             elif mark % 10 == 0:
                 p2 = self._polar_point(center, self.radius * 0.82, relative)
@@ -93,7 +93,7 @@ class NavigationRoseIndicator:
 
     def draw_aircraft_symbol(self) -> None:
         center = (self.radius, self.radius)
-        wing = self.radius * 0.16
+        wing = self.radius * 0.14
         pygame.draw.line(
             self.surface,
             PFD_COLORS["text_primary"],
@@ -112,7 +112,7 @@ class NavigationRoseIndicator:
     def draw_labels(self) -> None:
         mode_txt = self.small_font.render("GPS  TERM", True, PFD_COLORS["magenta"])
         mode_rect = mode_txt.get_rect()
-        mode_rect.center = (self.radius, self.radius + self.radius * 0.22)
+        mode_rect.center = (self.radius, self.radius + self.radius * 0.15)
         self.surface.blit(mode_txt, mode_rect)
 
     def draw(self) -> pygame.Rect:

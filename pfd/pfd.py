@@ -7,7 +7,6 @@
 
 import sys
 from dataclasses import dataclass
-from datetime import timedelta
 
 import numpy as np
 import pygame
@@ -17,8 +16,8 @@ from .airspeed_little import AirspeedIndicatorLittle
 from .altimeter import AltitudeIndicator
 from .altimeter_little import AltitudeIndicatorLittle
 from .attitude import ArtificalHorizon
-from .heading import HeadingIndicator
 from .navrose import NavigationRoseIndicator
+from .topbar import TopBarIndicator
 from .vspeed import VerticalSpeedIndicator
 from .vspeed_little import VerticalSpeedIndicatoLittle
 
@@ -40,6 +39,17 @@ class AircraftState:
     heading: float
     heading_cmd: float
     course: float
+    ### top bar telemetry
+    nav1_freq: float = 111.70
+    nav2_freq: float = 111.70
+    com1_freq: float = 121.800
+    com2_freq: float = 121.800
+    ap_gps: bool = True
+    ap_ap: bool = True
+    ap_alt: bool = True
+    ap_vs: bool = False
+    bug_heading: float = 0.0
+    bug_bearing: float = 0.0
 
 
 class PrimaryFlightDisplay:
@@ -58,6 +68,13 @@ class PrimaryFlightDisplay:
         self.size = min(self.resolution)
         self.unit = self.size / 16
 
+        self.top_bar_indicator = TopBarIndicator(
+            self.screen,
+            width=self.size * 1.05,
+            height=self.size / 11.0,
+            position=(self.screen_rect.centerx, self.screen_rect.top + self.size / 60),
+        )
+
         self.artifical_horizon = ArtificalHorizon(self.screen, size=self.size / 2)
         self.airspeed_indicator = AirspeedIndicator(
             self.screen,
@@ -74,15 +91,10 @@ class PrimaryFlightDisplay:
             size=self.size / 2.5,
             position=(self.altitude_indicator.background_rect.right + self.size / 100, self.screen_rect.center[1]),
         )
-        self.heading_indicator = HeadingIndicator(
-            self.screen,
-            size=self.size / 2,
-            position=(self.screen_rect.center[0], self.screen_rect.center[1] + self.unit * 5.55),
-        )
         self.nav_rose_indicator = NavigationRoseIndicator(
             self.screen,
-            size=self.size / 3.8,
-            position=(self.screen_rect.center[0], self.screen_rect.center[1] + self.unit * 3.75),
+            size=self.size / 4.1,
+            position=(self.screen_rect.center[0], self.screen_rect.center[1]),
         )
 
         self.render_rects = [self.screen_rect]
@@ -115,59 +127,34 @@ class PrimaryFlightDisplay:
                 position=(self.altitude_indicator.background_rect.right + self.size / 100, self.screen_rect.center[1]),
             )
 
-    def draw_fps(self) -> pygame.Rect:
-        font = pygame.font.SysFont(None, 24)
-        fps_txt = font.render(f"FPS: {self.fps:.0f}", True, self.text_color)
-        fps_txt_rect = fps_txt.get_rect()
-        fps_txt_rect.topleft = (12, 12)
-        fps_txt_rect.w = 80
-        self.screen.blit(fps_txt, fps_txt_rect)
-        return fps_txt_rect
-
-    def draw_real_time(self) -> pygame.Rect:
-        font = pygame.font.SysFont(None, 24)
-        time_txt = font.render(
-            "real_time: " + str(timedelta(seconds=self.real_time))[:-4], True, self.text_color
-        )
-        time_txt_rect = time_txt.get_rect()
-        time_txt_rect.topleft = (12, 36)
-        time_txt_rect.w = 200
-        self.screen.blit(time_txt, time_txt_rect)
-        return time_txt_rect
-
-    def draw_sim_time(self) -> pygame.Rect:
-        font = pygame.font.SysFont(None, 24)
-        time_txt = font.render("sim_time: " + str(timedelta(seconds=self.sim_time))[:-4], True, self.text_color)
-        time_txt_rect = time_txt.get_rect()
-        time_txt_rect.topleft = (12, 60)
-        time_txt_rect.w = 200
-        self.screen.blit(time_txt, time_txt_rect)
-        return time_txt_rect
-
     def update(self, state: AircraftState, real_time: float = None, sim_time: float = None) -> None:
         self.state = state
+        self.top_bar_indicator.update(
+            nav1_freq=state.nav1_freq,
+            nav2_freq=state.nav2_freq,
+            com1_freq=state.com1_freq,
+            com2_freq=state.com2_freq,
+            ap_gps=state.ap_gps,
+            ap_ap=state.ap_ap,
+            ap_alt=state.ap_alt,
+            ap_vs=state.ap_vs,
+            bug_heading=state.bug_heading,
+            bug_bearing=state.bug_bearing,
+        )
         self.artifical_horizon.update(state.roll, state.pitch)
         self.airspeed_indicator.update(state.airspeed, state.airspeed_cmd)
         self.altitude_indicator.update(state.altitude, state.altitude_cmd)
         self.vspeed_indicator.update(state.vspeed)
-        self.heading_indicator.update(state.heading, state.course, state.heading_cmd)
         self.nav_rose_indicator.update(state.heading, state.course, state.heading_cmd)
-        self.real_time = real_time
-        self.sim_time = sim_time
 
     def get_render_rects(self) -> list:
         render_rects = []
+        render_rects.append(self.top_bar_indicator.draw())
         render_rects.append(self.artifical_horizon.draw())
         render_rects.append(self.airspeed_indicator.draw())
         render_rects.append(self.altitude_indicator.draw())
         render_rects.append(self.vspeed_indicator.draw())
-        render_rects.append(self.heading_indicator.draw())
         render_rects.append(self.nav_rose_indicator.draw())
-        render_rects.append(self.draw_fps())
-        self.real_time = 0.0
-        render_rects.append(self.draw_real_time())
-        self.sim_time = 0.0
-        render_rects.append(self.draw_sim_time())
         return render_rects
 
     def draw_render_rects(self) -> None:
@@ -189,21 +176,16 @@ class PrimaryFlightDisplay:
 
     def draw(self, debug: bool = False) -> None:
         self.screen.fill((0, 0, 0))
+        self.top_bar_indicator.draw()
         self.artifical_horizon.draw()
         self.airspeed_indicator.draw()
         self.vspeed_indicator.draw()
         self.altitude_indicator.draw()
         self.nav_rose_indicator.draw()
-        self.heading_indicator.draw()
         if debug:
             self.artifical_horizon.draw_aux_axis()
         if self.masked:
             self.screen.blit(self.ah_screen, self.ah_screen_rect)
-        self.draw_fps()
-        if not self.real_time is None:
-            self.draw_real_time()
-        if not self.sim_time is None:
-            self.draw_sim_time()
 
     def render(self):
         ### pygame event handler

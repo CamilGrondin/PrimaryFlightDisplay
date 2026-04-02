@@ -8,6 +8,7 @@ from modes import (
     XPlaneRealtimeSource,
 )
 
+
 def prompt_text(label: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default is not None else ""
     value = input(f"{label}{suffix}: ").strip()
@@ -72,6 +73,16 @@ def run_pfd_loop(pfd: DisplayPFD, source, mode: int) -> None:
         "course": 0.0,
         "pitch": 0.0,
         "roll": 0.0,
+        "nav1_freq": 111.70,
+        "nav2_freq": 111.70,
+        "com1_freq": 121.800,
+        "com2_freq": 121.800,
+        "ap_gps": True,
+        "ap_ap": True,
+        "ap_alt": True,
+        "ap_vs": False,
+        "bug_heading": 0.0,
+        "bug_bearing": 0.0,
     }
 
     while True:
@@ -91,6 +102,16 @@ def run_pfd_loop(pfd: DisplayPFD, source, mode: int) -> None:
             state["pitch"],
             state["roll"],
             state["course"],
+            state["nav1_freq"],
+            state["nav2_freq"],
+            state["com1_freq"],
+            state["com2_freq"],
+            state["ap_gps"],
+            state["ap_ap"],
+            state["ap_alt"],
+            state["ap_vs"],
+            state["bug_heading"],
+            state["bug_bearing"],
         )
 
 
