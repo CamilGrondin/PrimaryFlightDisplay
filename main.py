@@ -25,12 +25,11 @@ class Com1RotaryTuner:
         self.pin_sw = pin_sw
         self.pin_aux = pin_aux
 
-        self.fine_step_mhz = 0.010
-        self.coarse_step_mhz = 0.010
+        self.fine_step_mhz = 0.001
+        self.coarse_step_mhz = 0.001
         self._pending_steps = 0
         self._active = GPIO is not None
         self._gpio = GPIO
-        self._last_state = 0
         self._last_a = 1
         self._last_b = 1
         self._last_snapshot = (1, 1, 1, 1)
@@ -52,7 +51,6 @@ class Com1RotaryTuner:
         gpio.setup(self.pin_b, gpio.IN, pull_up_down=gpio.PUD_UP)
         gpio.setup(self.pin_sw, gpio.IN, pull_up_down=gpio.PUD_UP)
         gpio.setup(self.pin_aux, gpio.IN, pull_up_down=gpio.PUD_UP)
-        self._last_state = self._read_ab_state()
         self._last_snapshot = self._read_snapshot()
         self._last_a, self._last_b = self._last_snapshot[0], self._last_snapshot[1]
 
@@ -99,18 +97,12 @@ class Com1RotaryTuner:
             self._decode_step(a, b)
 
     def _decode_step(self, a: int, b: int) -> None:
-        if a == self._last_a and b == self._last_b:
-            return
-
         step = 0
-        if a != self._last_a:
-            step = 1 if a != b else -1
-        elif b != self._last_b:
-            step = 1 if a == b else -1
-
+        # Count one step on A rising edge, use B phase to determine direction.
+        if a != self._last_a and a == 1:
+            step = 1 if b == 0 else -1
         self._last_a = a
         self._last_b = b
-        self._last_state = (a << 1) | b
         self._pending_steps += step
 
     def poll(self) -> tuple[int, float]:
