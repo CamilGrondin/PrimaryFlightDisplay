@@ -100,7 +100,7 @@ class Com1RotaryTuner:
         step = 0
         # Count one step on A rising edge, use B phase to determine direction.
         if a != self._last_a and a == 1:
-            step = 1 if b == 0 else -1
+            step = 1 if b == 1 else -1
         self._last_a = a
         self._last_b = b
         self._pending_steps += step
