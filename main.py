@@ -1,4 +1,5 @@
 from display import DisplayPFD
+import threading
 from modes import (
     JoystickManualSource,
     MODE_JOYSTICK,
@@ -29,6 +30,7 @@ class Com1RotaryTuner:
         self._active = GPIO is not None
         self._gpio = GPIO
         self._last_state = 0
+        self._lock = threading.Lock()
 
         self._transition = {
             (0, 1): 1,
@@ -57,6 +59,10 @@ class Com1RotaryTuner:
         gpio.setup(self.pin_aux, gpio.IN, pull_up_down=gpio.PUD_UP)
         self._last_state = self._read_ab_state()
 
+        # Edge interrupts avoid missing fast transitions between render frames.
+        gpio.add_event_detect(self.pin_a, gpio.BOTH, callback=self._on_edge)
+        gpio.add_event_detect(self.pin_b, gpio.BOTH, callback=self._on_edge)
+
     @property
     def available(self) -> bool:
         return self._active
@@ -77,28 +83,39 @@ class Com1RotaryTuner:
         coarse_selected = (gpio.input(self.pin_sw) == 0) or (gpio.input(self.pin_aux) == 0)
         return self.coarse_step_mhz if coarse_selected else self.fine_step_mhz
 
+    def _on_edge(self, _channel: int) -> None:
+        if not self._active:
+            return
+
+        current_state = self._read_ab_state()
+        with self._lock:
+            delta = self._transition.get((self._last_state, current_state), 0)
+            self._last_state = current_state
+            self._accumulator += delta
+
     def poll(self) -> tuple[int, float]:
         if not self._active:
             return 0, self.fine_step_mhz
 
-        current_state = self._read_ab_state()
-        delta = self._transition.get((self._last_state, current_state), 0)
-        self._last_state = current_state
-        self._accumulator += delta
-
         steps = 0
-        while self._accumulator >= 4:
-            steps += 1
-            self._accumulator -= 4
-        while self._accumulator <= -4:
-            steps -= 1
-            self._accumulator += 4
+        with self._lock:
+            while self._accumulator >= 4:
+                steps += 1
+                self._accumulator -= 4
+            while self._accumulator <= -4:
+                steps -= 1
+                self._accumulator += 4
 
         return steps, self._step_mhz()
 
     def stop(self) -> None:
         gpio = self._gpio
         if self._active and gpio is not None:
+            try:
+                gpio.remove_event_detect(self.pin_a)
+                gpio.remove_event_detect(self.pin_b)
+            except Exception:
+                pass
             gpio.cleanup((self.pin_a, self.pin_b, self.pin_sw, self.pin_aux))
 
 
@@ -232,10 +249,10 @@ def main() -> None:
     mode = choose_mode()
     pfd = DisplayPFD()
     data_source = build_source(mode)
-    com1_tuner = Com1RotaryTuner(pin_a=17, pin_b=27, pin_sw=22, pin_aux=4)
+    com1_tuner = Com1RotaryTuner(pin_a=4, pin_b=17, pin_sw=27, pin_aux=22)
 
     if com1_tuner.available:
-        print("COM1 rotary tuning active on GPIO BCM A=17 B=27 SW=22 AUX=4")
+        print("COM1 rotary tuning active on GPIO BCM A=4 B=17 SW=27 AUX=22")
     else:
         print("RPi.GPIO not available: COM1 rotary tuning disabled")
 
