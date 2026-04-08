@@ -4,7 +4,13 @@ from pfd import AircraftState, PrimaryFlightDisplay
 
 
 class DisplayPFD:
+    """Wrapper for Primary Flight Display rendering.
+
+    Manages screen configuration and aircraft state visualization.
+    """
+
     def __init__(self):
+        """Initialize display with default screen dimensions."""
         SCREEN_WIDTH = 1000
         SCREEN_HEIGHT = 800
 
@@ -13,24 +19,45 @@ class DisplayPFD:
 
     def update_display(
         self,
-        airspeed,
-        altitude,
-        heading,
-        vertical_speed,
-        pitch,
-        roll=0.0,
-        course=None,
-        nav1_freq=111.70,
-        nav2_freq=111.70,
-        com1_freq=121.800,
-        com2_freq=121.800,
-        ap_gps=True,
-        ap_ap=True,
-        ap_alt=True,
-        ap_vs=False,
-        bug_heading=0.0,
-        bug_bearing=0.0,
-    ):
+        airspeed: float,
+        altitude: float,
+        heading: float,
+        vertical_speed: float,
+        pitch: float,
+        roll: float = 0.0,
+        course: float | None = None,
+        nav1_freq: float = 111.70,
+        nav2_freq: float = 111.70,
+        com1_freq: float = 121.800,
+        com2_freq: float = 121.800,
+        ap_gps: bool = True,
+        ap_ap: bool = True,
+        ap_alt: bool = True,
+        ap_vs: bool = False,
+        bug_heading: float = 0.0,
+        bug_bearing: float = 0.0,
+    ) -> None:
+        """Update and render the Primary Flight Display with current aircraft state.
+
+        Args:
+            airspeed: True airspeed in knots.
+            altitude: Altitude in feet.
+            heading: Magnetic heading in degrees (0-360).
+            vertical_speed: Vertical speed in feet per minute.
+            pitch: Aircraft pitch angle in degrees.
+            roll: Aircraft roll angle in degrees (default: 0).
+            course: Wind course in degrees; defaults to heading if None.
+            nav1_freq: NAV1 frequency in MHz (default: 111.70).
+            nav2_freq: NAV2 frequency in MHz (default: 111.70).
+            com1_freq: COM1 frequency in MHz (default: 121.800).
+            com2_freq: COM2 frequency in MHz (default: 121.800).
+            ap_gps: Autopilot GPS mode active (default: True).
+            ap_ap: Autopilot mode active (default: True).
+            ap_alt: Autopilot altitude hold active (default: True).
+            ap_vs: Autopilot vertical speed mode active (default: False).
+            bug_heading: Heading bug position in degrees (default: 0).
+            bug_bearing: Bearing bug position in degrees (default: 0).
+        """
         t = time.time() - self.t0
         if course is None:
             course = heading

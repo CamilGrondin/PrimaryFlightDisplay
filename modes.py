@@ -22,6 +22,11 @@ MODE_MSP = 3
 
 @dataclass
 class Telemetry:
+    """Aircraft telemetry data structure.
+
+    Contains all flight parameters: attitude, speed, altitude, heading,
+    radio frequencies, and autopilot settings.
+    """
     airspeed: float = 0.0
     altitude: float = 0.0
     vertical_speed: float = 0.0
@@ -68,11 +73,33 @@ class Telemetry:
 
 
 def _normalize_heading(value: float) -> float:
+    """Normalize heading angle to [0, 360) range.
+
+    Args:
+        value: Heading angle in degrees.
+
+    Returns:
+        Normalized heading in [0, 360) degrees.
+    """
     return value % 360.0
 
 
 class JoystickManualSource:
+    """Manual flight control via joystick input.
+
+    Reads joystick axes and simulates realistic aircraft dynamics
+    including bank-to-turn calculation and speed ramping.
+    """
+
     def __init__(self, joystick_name_hint: str = "X52") -> None:
+        """Initialize joystick input handler.
+
+        Args:
+            joystick_name_hint: Substring to match joystick name (default: 'X52').
+
+        Raises:
+            RuntimeError: If no joystick is detected or initialization fails.
+        """
         pygame.joystick.init()
         count = pygame.joystick.get_count()
         if count <= 0:
@@ -102,11 +129,27 @@ class JoystickManualSource:
         print("Manual mode joystick: " + self.joystick.get_name())
 
     def _axis(self, index: int, default: float = 0.0) -> float:
+        """Read joystick axis value with bounds checking.
+
+        Args:
+            index: Axis index number.
+            default: Value if axis index out of range.
+
+        Returns:
+            Axis value in [-1.0, 1.0] or default if missing.
+        """
         if index >= self.joystick.get_numaxes():
             return default
         return float(self.joystick.get_axis(index))
 
     def poll(self) -> Dict[str, float | bool]:
+        """Poll joystick and compute simulated aircraft state.
+
+        Processes joystick input and applies physics-based aircraft dynamics.
+
+        Returns:
+            Dictionary with telemetry data (airspeed, altitude, heading, etc.).
+        """
         pygame.event.pump()
 
         now = time.monotonic()
@@ -159,7 +202,19 @@ class JoystickManualSource:
 
 
 class XPlaneRealtimeSource:
+    """Real-time telemetry from X-Plane simulator via UDP.
+
+    Connects to X-Plane on a local or remote host and receives aircraft
+    state updates via UDP protocol.
+    """
+
     def __init__(self, ip: str, port: int) -> None:
+        """Initialize X-Plane connection parameters.
+
+        Args:
+            ip: X-Plane host IP address.
+            port: X-Plane UDP port (typically 49000).
+        """
         self.ip = ip
         self.port = port
         self.data_queue: "queue.Queue[Dict[str, float]]" = queue.Queue(maxsize=200)
@@ -167,6 +222,7 @@ class XPlaneRealtimeSource:
         self.thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
+        """Start background thread to receive X-Plane UDP data."""
         if self.thread is not None:
             return
         self.thread = threading.Thread(target=self._worker, daemon=True)
@@ -174,6 +230,7 @@ class XPlaneRealtimeSource:
         print(f"X-Plane mode connected to {self.ip}:{self.port}")
 
     def _worker(self) -> None:
+        """Background worker thread receiving X-Plane data."""
         try:
             simulator = Simulator(ip=self.ip, port=self.port)
             simulator.run(self.data_queue)
@@ -182,6 +239,17 @@ class XPlaneRealtimeSource:
                 self.error_queue.put(exc)
 
     def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float | bool]]:
+        """Poll latest X-Plane data from queue.
+
+        Args:
+            timeout: Queue timeout in seconds.
+
+        Returns:
+            Latest telemetry dict or None if queue empty.
+
+        Raises:
+            RuntimeError: If X-Plane connection failed.
+        """
         if not self.error_queue.empty():
             raise RuntimeError("X-Plane source stopped: " + str(self.error_queue.get()))
         try:
@@ -211,10 +279,26 @@ class XPlaneRealtimeSource:
 
 
 class MSPClient:
-    MSP_ATTITUDE = 108
-    MSP_ALTITUDE = 109
+    """MultiWii Serial Protocol (MSP) communication client.
+
+    Sends commands to and receives telemetry from flight controllers
+    using the MSP protocol over serial connection.
+    """
+
+    MSP_ATTITUDE = 108      # Request attitude (roll, pitch, yaw)
+    MSP_ALTITUDE = 109      # Request altitude and vertical speed
 
     def __init__(self, port: str, baudrate: int, timeout: float = 0.25) -> None:
+        """Initialize MSP serial connection.
+
+        Args:
+            port: Serial port path (e.g., '/dev/ttyUSB0').
+            baudrate: Serial baudrate (typically 115200).
+            timeout: Read timeout in seconds.
+
+        Raises:
+            RuntimeError: If pyserial is not installed.
+        """
         if serial is None:
             raise RuntimeError("pyserial is required for MSP mode. Install with: pip install pyserial")
         self.port = port
@@ -229,17 +313,35 @@ class MSPClient:
             pass
 
     def _checksum(self, payload: bytes) -> int:
+        """Calculate MSP frame checksum (XOR of all payload bytes).
+
+        Args:
+            payload: Frame payload bytes.
+
+        Returns:
+            XOR checksum value.
+        """
         crc = 0
         for b in payload:
             crc ^= b
         return crc
 
     def _request(self, cmd: int) -> None:
+        """Send MSP command request.
+
+        Args:
+            cmd: MSP command code.
+        """
         frame_body = bytes([0, cmd])
         frame = b"$M<" + frame_body + bytes([self._checksum(frame_body)])
         self.conn.write(frame)
 
     def _read_frame(self) -> Optional[tuple[int, bytes]]:
+        """Read and validate MSP frame from serial.
+
+        Returns:
+            Tuple of (command, payload) or None if timeout/invalid.
+        """
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
             if self.conn.read(1) != b"$":
@@ -271,6 +373,14 @@ class MSPClient:
         return None
 
     def request(self, cmd: int) -> Optional[bytes]:
+        """Send command and receive response.
+
+        Args:
+            cmd: MSP command code.
+
+        Returns:
+            Response payload or None if timeout/mismatch.
+        """
         self._request(cmd)
         frame = self._read_frame()
         if frame is None:
@@ -282,7 +392,19 @@ class MSPClient:
 
 
 class MSPRealtimeSource:
+    """Real-time telemetry from flight controllers via MSP serial.
+
+    Polls MultiWii-compatible flight controllers and extracts attitude,
+    altitude, and vertical speed via serial MSP protocol.
+    """
+
     def __init__(self, port: str, baudrate: int) -> None:
+        """Initialize MSP connection parameters.
+
+        Args:
+            port: Serial port path.
+            baudrate: Serial baudrate (typically 115200).
+        """
         self.port = port
         self.baudrate = baudrate
         self.data_queue: "queue.Queue[Dict[str, float]]" = queue.Queue(maxsize=200)
@@ -291,6 +413,7 @@ class MSPRealtimeSource:
         self._running = threading.Event()
 
     def start(self) -> None:
+        """Start background thread to poll MSP data."""
         if self.thread is not None:
             return
         self._running.set()
@@ -299,6 +422,7 @@ class MSPRealtimeSource:
         print(f"MSP mode listening on {self.port} @ {self.baudrate} baud")
 
     def stop(self) -> None:
+        """Stop MSP polling thread."""
         self._running.clear()
 
     def _worker(self) -> None:
@@ -346,6 +470,17 @@ class MSPRealtimeSource:
                 client.close()
 
     def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float | bool]]:
+        """Poll latest MSP data from queue.
+
+        Args:
+            timeout: Queue timeout in seconds.
+
+        Returns:
+            Latest telemetry dict or None if queue empty.
+
+        Raises:
+            RuntimeError: If MSP connection failed.
+        """
         if not self.error_queue.empty():
             raise RuntimeError("MSP source stopped: " + str(self.error_queue.get()))
         try:

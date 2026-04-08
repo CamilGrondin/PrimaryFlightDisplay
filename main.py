@@ -146,6 +146,16 @@ class Com1RotaryTuner:
 
 
 def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
+    """Adjust COM1 frequency within valid aviation band range.
+
+    Args:
+        current: Current COM frequency in MHz.
+        steps: Number of steps to adjust (positive or negative).
+        step_mhz: Size of each step in MHz.
+
+    Returns:
+        Adjusted frequency, clamped to [118.000, 136.975] MHz range.
+    """
     com_min = 118.000
     com_max = 136.975
 
@@ -155,6 +165,18 @@ def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
 
 
 def prompt_text(label: str, default: str | None = None) -> str:
+    """Prompt user for text input with optional default value.
+
+    Args:
+        label: Prompt message display text.
+        default: Default value if user enters nothing.
+
+    Returns:
+        User input or default value.
+
+    Raises:
+        ValueError: If value is required but not provided.
+    """
     suffix = f" [{default}]" if default is not None else ""
     value = input(f"{label}{suffix}: ").strip()
     if value:
@@ -165,6 +187,15 @@ def prompt_text(label: str, default: str | None = None) -> str:
 
 
 def prompt_int(label: str, default: int | None = None) -> int:
+    """Prompt user for integer input with optional default value.
+
+    Args:
+        label: Prompt message display text.
+        default: Default value if user enters nothing.
+
+    Returns:
+        Parsed integer value.
+    """
     while True:
         value = prompt_text(label, str(default) if default is not None else None)
         try:
@@ -174,6 +205,11 @@ def prompt_int(label: str, default: int | None = None) -> int:
 
 
 def choose_mode() -> int:
+    """Present mode selection menu and return user's choice.
+
+    Returns:
+        MODE_JOYSTICK (1), MODE_XPLANE (2), or MODE_MSP (3).
+    """
     print("Primary Flight Display")
     print("1 - Manual control via joystick Saitek X52")
     print("2 - Real-time data from X-Plane (UDP)")
@@ -186,6 +222,14 @@ def choose_mode() -> int:
 
 
 def build_source(mode: int):
+    """Create and configure telemetry source based on selected mode.
+
+    Args:
+        mode: Operating mode (1=Joystick, 2=X-Plane, 3=MSP).
+
+    Returns:
+        Initialized telemetry source (JoystickManualSource, XPlaneRealtimeSource, or MSPRealtimeSource).
+    """
     if mode == MODE_JOYSTICK:
         joystick_name = prompt_text("Joystick name hint", "X52")
         source = JoystickManualSource(joystick_name_hint=joystick_name)
@@ -209,6 +253,20 @@ def build_source(mode: int):
 
 
 def run_pfd_loop(pfd: DisplayPFD, source, mode: int, com1_tuner: Com1RotaryTuner | None = None) -> None:
+    """Main display loop: poll telemetry, update PFD, process COM1 tuning.
+
+    Continuously polls the telemetry source, updates aircraft state, and renders
+    the primary flight display. Handles COM1 frequency adjustment via rotary encoder.
+
+    Args:
+        pfd: DisplayPFD instance for rendering.
+        source: Telemetry source (joystick, X-Plane, or MSP).
+        mode: Operating mode constant.
+        com1_tuner: Optional Com1RotaryTuner for GPIO-based frequency adjustment.
+
+    Raises:
+        RuntimeError: If telemetry source encounters an error.
+    """
     state = {
         "airspeed": 0.0,
         "altitude": 0.0,
@@ -271,6 +329,7 @@ def run_pfd_loop(pfd: DisplayPFD, source, mode: int, com1_tuner: Com1RotaryTuner
 
 
 def main() -> None:
+    """Main entry point: initialize configuration, select mode, and run display loop."""
     mode = choose_mode()
     pfd = DisplayPFD()
     data_source = build_source(mode)
