@@ -27,25 +27,16 @@ class Com1RotaryTuner:
 
         self.fine_step_mhz = 0.025
         self.coarse_step_mhz = 1.000
-        self._accumulator = 0
+        self._pending_steps = 0
         self._active = GPIO is not None
         self._gpio = GPIO
         self._last_state = 0
+        self._last_a = 1
+        self._last_b = 1
         self._last_snapshot = (1, 1, 1, 1)
         self._last_diag_t = 0.0
         self._debug = True
         self._lock = threading.Lock()
-
-        self._transition = {
-            (0, 1): 1,
-            (1, 3): 1,
-            (3, 2): 1,
-            (2, 0): 1,
-            (1, 0): -1,
-            (3, 1): -1,
-            (2, 3): -1,
-            (0, 2): -1,
-        }
 
         if not self._active:
             return
@@ -63,6 +54,7 @@ class Com1RotaryTuner:
         gpio.setup(self.pin_aux, gpio.IN, pull_up_down=gpio.PUD_UP)
         self._last_state = self._read_ab_state()
         self._last_snapshot = self._read_snapshot()
+        self._last_a, self._last_b = self._last_snapshot[0], self._last_snapshot[1]
 
         # Edge interrupts avoid missing fast transitions between render frames.
         gpio.add_event_detect(self.pin_a, gpio.BOTH, callback=self._on_edge, bouncetime=1)
@@ -107,11 +99,24 @@ class Com1RotaryTuner:
         if not self._active:
             return
 
-        current_state = self._read_ab_state()
+        a, b, _, _ = self._read_snapshot()
         with self._lock:
-            delta = self._transition.get((self._last_state, current_state), 0)
-            self._last_state = current_state
-            self._accumulator += delta
+            self._decode_step(a, b)
+
+    def _decode_step(self, a: int, b: int) -> None:
+        if a == self._last_a and b == self._last_b:
+            return
+
+        step = 0
+        if a != self._last_a:
+            step = 1 if a != b else -1
+        elif b != self._last_b:
+            step = 1 if a == b else -1
+
+        self._last_a = a
+        self._last_b = b
+        self._last_state = (a << 1) | b
+        self._pending_steps += step
 
     def poll(self) -> tuple[int, float]:
         if not self._active:
@@ -119,10 +124,10 @@ class Com1RotaryTuner:
 
         # Software fallback decode in case edge callbacks are throttled/missed.
         current_state = self._read_ab_state()
+        a = (current_state >> 1) & 1
+        b = current_state & 1
         with self._lock:
-            delta = self._transition.get((self._last_state, current_state), 0)
-            self._last_state = current_state
-            self._accumulator += delta
+            self._decode_step(a, b)
 
         if self._debug:
             snapshot = self._read_snapshot()
@@ -134,16 +139,11 @@ class Com1RotaryTuner:
             if now - self._last_diag_t >= 3.0:
                 self._last_diag_t = now
                 a, b, sw, aux = self._last_snapshot
-                print(f"GPIO idle A={a} B={b} SW={sw} AUX={aux} acc={self._accumulator}")
+                print(f"GPIO idle A={a} B={b} SW={sw} AUX={aux} steps={self._pending_steps}")
 
-        steps = 0
         with self._lock:
-            while self._accumulator >= 4:
-                steps += 1
-                self._accumulator -= 4
-            while self._accumulator <= -4:
-                steps -= 1
-                self._accumulator += 4
+            steps = self._pending_steps
+            self._pending_steps = 0
 
         return steps, self._step_mhz()
 
