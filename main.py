@@ -25,8 +25,8 @@ class Com1RotaryTuner:
         self.pin_sw = pin_sw
         self.pin_aux = pin_aux
 
-        self.fine_step_mhz = 0.001
-        self.coarse_step_mhz = 1.000
+        self.fine_step_mhz = 0.010
+        self.coarse_step_mhz = 0.010
         self._pending_steps = 0
         self._active = GPIO is not None
         self._gpio = GPIO
@@ -88,12 +88,7 @@ class Com1RotaryTuner:
         )
 
     def _step_mhz(self) -> float:
-        gpio = self._gpio
-        if gpio is None:
-            return self.fine_step_mhz
-        # Hold SW (22) or AUX (4) low to switch to coarse 1 MHz stepping.
-        coarse_selected = (gpio.input(self.pin_sw) == 0) or (gpio.input(self.pin_aux) == 0)
-        return self.coarse_step_mhz if coarse_selected else self.fine_step_mhz
+        return self.fine_step_mhz
 
     def _on_edge(self, _channel: int) -> None:
         if not self._active:
