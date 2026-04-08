@@ -195,12 +195,17 @@ def run_pfd_loop(pfd: DisplayPFD, source, mode: int, com1_tuner: Com1RotaryTuner
             data = source.poll(timeout=0.05)
 
         if data is not None:
-            state.update(data)
+            for key, value in data.items():
+                # COM1 is controlled locally by the encoder; avoid source overwrite.
+                if key == "com1_freq":
+                    continue
+                state[key] = value
 
         if com1_tuner is not None:
             steps, step_mhz = com1_tuner.poll()
             if steps != 0:
                 state["com1_freq"] = _adjust_com_frequency(state["com1_freq"], steps, step_mhz)
+                print(f"COM1 -> {state['com1_freq']:.3f}")
 
         pfd.update_display(
             state["airspeed"],
