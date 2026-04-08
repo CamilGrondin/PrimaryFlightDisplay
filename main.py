@@ -25,7 +25,7 @@ class Com1RotaryTuner:
         self.pin_sw = pin_sw
         self.pin_aux = pin_aux
 
-        self.fine_step_mhz = 0.025
+        self.fine_step_mhz = 0.001
         self.coarse_step_mhz = 1.000
         self._pending_steps = 0
         self._active = GPIO is not None
@@ -163,7 +163,6 @@ def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
     com_max = 136.975
 
     tuned = current + steps * step_mhz
-    tuned = round(tuned * 40.0) / 40.0  # snap to 25 kHz channel spacing
     tuned = max(com_min, min(com_max, tuned))
     return round(tuned, 3)
 
