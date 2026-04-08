@@ -8,6 +8,109 @@ from modes import (
     XPlaneRealtimeSource,
 )
 
+try:
+    import RPi.GPIO as GPIO  # type: ignore
+except Exception:  # pragma: no cover - optional dependency on non-RPi hosts
+    GPIO = None
+
+
+class Com1RotaryTuner:
+    """Read a quadrature rotary encoder on Raspberry Pi GPIO to tune COM1."""
+
+    def __init__(self, pin_a: int = 17, pin_b: int = 27, pin_sw: int = 22, pin_aux: int = 4) -> None:
+        self.pin_a = pin_a
+        self.pin_b = pin_b
+        self.pin_sw = pin_sw
+        self.pin_aux = pin_aux
+
+        self.fine_step_mhz = 0.025
+        self.coarse_step_mhz = 1.000
+        self._accumulator = 0
+        self._active = GPIO is not None
+        self._gpio = GPIO
+        self._last_state = 0
+
+        self._transition = {
+            (0, 1): 1,
+            (1, 3): 1,
+            (3, 2): 1,
+            (2, 0): 1,
+            (1, 0): -1,
+            (3, 1): -1,
+            (2, 3): -1,
+            (0, 2): -1,
+        }
+
+        if not self._active:
+            return
+
+        gpio = self._gpio
+        if gpio is None:
+            self._active = False
+            return
+
+        gpio.setwarnings(False)
+        gpio.setmode(gpio.BCM)
+        gpio.setup(self.pin_a, gpio.IN, pull_up_down=gpio.PUD_UP)
+        gpio.setup(self.pin_b, gpio.IN, pull_up_down=gpio.PUD_UP)
+        gpio.setup(self.pin_sw, gpio.IN, pull_up_down=gpio.PUD_UP)
+        gpio.setup(self.pin_aux, gpio.IN, pull_up_down=gpio.PUD_UP)
+        self._last_state = self._read_ab_state()
+
+    @property
+    def available(self) -> bool:
+        return self._active
+
+    def _read_ab_state(self) -> int:
+        gpio = self._gpio
+        if gpio is None:
+            return 0
+        a = gpio.input(self.pin_a)
+        b = gpio.input(self.pin_b)
+        return (a << 1) | b
+
+    def _step_mhz(self) -> float:
+        gpio = self._gpio
+        if gpio is None:
+            return self.fine_step_mhz
+        # Hold SW (22) or AUX (4) low to switch to coarse 1 MHz stepping.
+        coarse_selected = (gpio.input(self.pin_sw) == 0) or (gpio.input(self.pin_aux) == 0)
+        return self.coarse_step_mhz if coarse_selected else self.fine_step_mhz
+
+    def poll(self) -> tuple[int, float]:
+        if not self._active:
+            return 0, self.fine_step_mhz
+
+        current_state = self._read_ab_state()
+        delta = self._transition.get((self._last_state, current_state), 0)
+        self._last_state = current_state
+        self._accumulator += delta
+
+        steps = 0
+        while self._accumulator >= 4:
+            steps += 1
+            self._accumulator -= 4
+        while self._accumulator <= -4:
+            steps -= 1
+            self._accumulator += 4
+
+        return steps, self._step_mhz()
+
+    def stop(self) -> None:
+        gpio = self._gpio
+        if self._active and gpio is not None:
+            gpio.cleanup((self.pin_a, self.pin_b, self.pin_sw, self.pin_aux))
+
+
+def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
+    com_min = 118.000
+    com_max = 136.975
+
+    tuned = current + steps * step_mhz
+    tuned = round(tuned * 40.0) / 40.0  # snap to 25 kHz channel spacing
+    tuned = max(com_min, min(com_max, tuned))
+    return round(tuned, 3)
+
 
 def prompt_text(label: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default is not None else ""
@@ -63,7 +166,7 @@ def build_source(mode: int):
     return source
 
 
-def run_pfd_loop(pfd: DisplayPFD, source, mode: int) -> None:
+def run_pfd_loop(pfd: DisplayPFD, source, mode: int, com1_tuner: Com1RotaryTuner | None = None) -> None:
     state = {
         "airspeed": 0.0,
         "altitude": 0.0,
@@ -94,6 +197,11 @@ def run_pfd_loop(pfd: DisplayPFD, source, mode: int) -> None:
         if data is not None:
             state.update(data)
 
+        if com1_tuner is not None:
+            steps, step_mhz = com1_tuner.poll()
+            if steps != 0:
+                state["com1_freq"] = _adjust_com_frequency(state["com1_freq"], steps, step_mhz)
+
         pfd.update_display(
             state["airspeed"],
             state["altitude"],
@@ -119,14 +227,21 @@ def main() -> None:
     mode = choose_mode()
     pfd = DisplayPFD()
     data_source = build_source(mode)
+    com1_tuner = Com1RotaryTuner(pin_a=17, pin_b=27, pin_sw=22, pin_aux=4)
+
+    if com1_tuner.available:
+        print("COM1 rotary tuning active on GPIO BCM A=17 B=27 SW=22 AUX=4")
+    else:
+        print("RPi.GPIO not available: COM1 rotary tuning disabled")
 
     try:
-        run_pfd_loop(pfd, data_source, mode)
+        run_pfd_loop(pfd, data_source, mode, com1_tuner=com1_tuner)
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
     finally:
         if hasattr(data_source, "stop"):
             data_source.stop()
+        com1_tuner.stop()
 
 
 if __name__ == "__main__":

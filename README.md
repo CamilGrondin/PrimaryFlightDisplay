@@ -30,6 +30,11 @@ A Primary Flight Display (PFD) interface created with Pygame for real-time visua
     pip install numpy pygame
     ```
 
+    On Raspberry Pi, for COM1 tuning with a GPIO rotary encoder, also install:
+    ```bash
+    pip install RPi.GPIO
+    ```
+
     For MSP mode (mode 3), also install:
     ```bash
     pip install pyserial
@@ -49,6 +54,17 @@ The application now supports three runtime modes:
 - Mode 1: Manual control with joystick (Saitek X52 preferred)
 - Mode 2: Real-time X-Plane data through UDP
 - Mode 3: IMU data from a flight controller through MSP (serial)
+
+### COM1 Tuning From Raspberry Pi GPIO
+
+The main loop can tune COM1 with a PT65 301 rotary encoder on BCM GPIO pins:
+
+- A (CLK): GPIO 17
+- B (DT): GPIO 27
+- SW: GPIO 22
+- AUX: GPIO 4
+
+Rotation updates COM1 frequency in 25 kHz steps by default. Holding SW (22) or AUX (4) enables coarse 1 MHz steps.
 
 Examples:
 
