@@ -1,5 +1,6 @@
 from display import DisplayPFD
 import threading
+import time
 from modes import (
     JoystickManualSource,
     MODE_JOYSTICK,
@@ -30,6 +31,9 @@ class Com1RotaryTuner:
         self._active = GPIO is not None
         self._gpio = GPIO
         self._last_state = 0
+        self._last_snapshot = (1, 1, 1, 1)
+        self._last_diag_t = 0.0
+        self._debug = True
         self._lock = threading.Lock()
 
         self._transition = {
@@ -58,10 +62,15 @@ class Com1RotaryTuner:
         gpio.setup(self.pin_sw, gpio.IN, pull_up_down=gpio.PUD_UP)
         gpio.setup(self.pin_aux, gpio.IN, pull_up_down=gpio.PUD_UP)
         self._last_state = self._read_ab_state()
+        self._last_snapshot = self._read_snapshot()
 
         # Edge interrupts avoid missing fast transitions between render frames.
-        gpio.add_event_detect(self.pin_a, gpio.BOTH, callback=self._on_edge)
-        gpio.add_event_detect(self.pin_b, gpio.BOTH, callback=self._on_edge)
+        gpio.add_event_detect(self.pin_a, gpio.BOTH, callback=self._on_edge, bouncetime=1)
+        gpio.add_event_detect(self.pin_b, gpio.BOTH, callback=self._on_edge, bouncetime=1)
+
+        if self._debug:
+            a, b, sw, aux = self._last_snapshot
+            print(f"GPIO init A={a} B={b} SW={sw} AUX={aux}")
 
     @property
     def available(self) -> bool:
@@ -74,6 +83,17 @@ class Com1RotaryTuner:
         a = gpio.input(self.pin_a)
         b = gpio.input(self.pin_b)
         return (a << 1) | b
+
+    def _read_snapshot(self) -> tuple[int, int, int, int]:
+        gpio = self._gpio
+        if gpio is None:
+            return (1, 1, 1, 1)
+        return (
+            int(gpio.input(self.pin_a)),
+            int(gpio.input(self.pin_b)),
+            int(gpio.input(self.pin_sw)),
+            int(gpio.input(self.pin_aux)),
+        )
 
     def _step_mhz(self) -> float:
         gpio = self._gpio
@@ -96,6 +116,25 @@ class Com1RotaryTuner:
     def poll(self) -> tuple[int, float]:
         if not self._active:
             return 0, self.fine_step_mhz
+
+        # Software fallback decode in case edge callbacks are throttled/missed.
+        current_state = self._read_ab_state()
+        with self._lock:
+            delta = self._transition.get((self._last_state, current_state), 0)
+            self._last_state = current_state
+            self._accumulator += delta
+
+        if self._debug:
+            snapshot = self._read_snapshot()
+            if snapshot != self._last_snapshot:
+                a, b, sw, aux = snapshot
+                print(f"GPIO A={a} B={b} SW={sw} AUX={aux}")
+                self._last_snapshot = snapshot
+            now = time.monotonic()
+            if now - self._last_diag_t >= 3.0:
+                self._last_diag_t = now
+                a, b, sw, aux = self._last_snapshot
+                print(f"GPIO idle A={a} B={b} SW={sw} AUX={aux} acc={self._accumulator}")
 
         steps = 0
         with self._lock:
