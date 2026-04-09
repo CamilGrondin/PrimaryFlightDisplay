@@ -1,5 +1,6 @@
 import struct
 import socket
+import threading
 from queue import Queue, Empty
 
 class Simulator:
@@ -11,6 +12,7 @@ class Simulator:
         self.port = port
         self.sock, self.address = self.initialize_socket(ip, port)
         self.data_queue = Queue()  # Ensure Queue is instantiated correctly
+        self._switch_lock = threading.Lock()
 
         self.datarefs = {
             "airspeed": (0, b'sim/flightmodel/position/indicated_airspeed\0'),
@@ -97,6 +99,34 @@ class Simulator:
         for cmd in commands:
             self.sock.sendto(cmd, self.address)
 
+    def set_switch_states(self, states):
+        """Update simulator switch states from external GPIO inputs."""
+        if not isinstance(states, dict):
+            return
+        with self._switch_lock:
+            for name, value in states.items():
+                if name in self.switch_states_irl:
+                    self.switch_states_irl[name] = 1 if bool(value) else 0
+
+    def _snapshot_switch_states(self):
+        with self._switch_lock:
+            return dict(self.switch_states_irl)
+
+    def _refresh_calculated_switches(self, irl_states):
+        """Apply breaker logic and compute outgoing switch states."""
+        battery_enabled = int(self.breaker_states.get("PWR", 0) == 0 and irl_states.get("battery_switch", 0))
+        self.switch_states_calculated["battery_switch"] = battery_enabled
+
+        for switch_name in (
+            "beacon_lights",
+            "landing_lights",
+            "taxi_lights",
+            "nav_lights",
+            "strobe_lights",
+            "pitot_heat",
+        ):
+            self.switch_states_calculated[switch_name] = int(battery_enabled and irl_states.get(switch_name, 0))
+
     def receive_and_process_data(self):
         """Receive and process data from the simulator."""
         data, _ = self.sock.recvfrom(2048)
@@ -123,18 +153,16 @@ class Simulator:
         self.subscribe_datarefs()
         try:
             while True:
-                for breaker, state in self.breaker_states.items():
-                    match breaker:
-                        case "PWR":
-                            self.switch_states_calculated["battery_switch"] = state == 0 and self.switch_states_irl["battery_switch"] or 0
-                
+                irl_states = self._snapshot_switch_states()
+                self._refresh_calculated_switches(irl_states)
+
                 beacon_command = [
-                    self.pack_dref_message(b'DREF', 0, self.datarefs["beacon_lights"][1]),
+                    self.pack_dref_message(b'DREF', self.switch_states_calculated["beacon_lights"], self.datarefs["beacon_lights"][1]),
                     self.pack_dref_message(b'DREF', self.switch_states_calculated["landing_lights"], self.datarefs["landing_lights"][1]),
-                    self.pack_dref_message(b'DREF', 0, self.datarefs["taxi_lights"][1]),
-                    self.pack_dref_message(b'DREF', 0, self.datarefs["nav_lights"][1]),
-                    self.pack_dref_message(b'DREF', 0, self.datarefs["strobe_lights"][1]),
-                    self.pack_dref_message(b'DREF', 0, self.datarefs["pitot_heat"][1]),
+                    self.pack_dref_message(b'DREF', self.switch_states_calculated["taxi_lights"], self.datarefs["taxi_lights"][1]),
+                    self.pack_dref_message(b'DREF', self.switch_states_calculated["nav_lights"], self.datarefs["nav_lights"][1]),
+                    self.pack_dref_message(b'DREF', self.switch_states_calculated["strobe_lights"], self.datarefs["strobe_lights"][1]),
+                    self.pack_dref_message(b'DREF', self.switch_states_calculated["pitot_heat"], self.datarefs["pitot_heat"][1]),
                     self.pack_dref_message(b'DREF', self.switch_states_calculated["battery_switch"], self.datarefs["battery_switch"][1]),
                 ]
                 self.send_commands(beacon_command)

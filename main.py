@@ -145,6 +145,83 @@ class Com1RotaryTuner:
             gpio.cleanup((self.pin_a, self.pin_b, self.pin_sw, self.pin_aux))
 
 
+class XPlaneGPIOSwitchPanel:
+    """Read GPIO button states and expose X-Plane-compatible switch values."""
+
+    def __init__(
+        self,
+        pin_map: dict[str, int] | None = None,
+        active_low: bool = True,
+        debug: bool = True,
+    ) -> None:
+        self.pin_map = pin_map or {
+            "battery_switch": 5,
+            "beacon_lights": 6,
+            "landing_lights": 13,
+            "taxi_lights": 19,
+            "nav_lights": 26,
+            "strobe_lights": 20,
+            "pitot_heat": 21,
+        }
+        self.active_low = active_low
+        self._debug = debug
+        self._active = GPIO is not None
+        self._gpio = GPIO
+        self._last_states: dict[str, int] = {}
+
+        if not self._active:
+            return
+
+        gpio = self._gpio
+        if gpio is None:
+            self._active = False
+            return
+
+        gpio.setwarnings(False)
+        gpio.setmode(gpio.BCM)
+        pull_mode = gpio.PUD_UP if self.active_low else gpio.PUD_DOWN
+        for pin in self.pin_map.values():
+            gpio.setup(pin, gpio.IN, pull_up_down=pull_mode)
+
+        self._last_states = self.read_states()
+        if self._debug:
+            details = ", ".join(f"{name}=GPIO{pin}" for name, pin in self.pin_map.items())
+            print("GPIO switch panel init: " + details)
+
+    @property
+    def available(self) -> bool:
+        return self._active
+
+    def read_states(self) -> dict[str, int]:
+        gpio = self._gpio
+        if not self._active or gpio is None:
+            return {}
+
+        states: dict[str, int] = {}
+        for name, pin in self.pin_map.items():
+            raw = int(gpio.input(pin))
+            states[name] = 1 if (raw == 0 if self.active_low else raw == 1) else 0
+        return states
+
+    def poll_changed(self) -> dict[str, int] | None:
+        if not self._active:
+            return None
+
+        current = self.read_states()
+        if current != self._last_states:
+            self._last_states = current
+            if self._debug:
+                pretty = ", ".join(f"{key}={value}" for key, value in sorted(current.items()))
+                print("GPIO switches -> " + pretty)
+            return current
+        return None
+
+    def stop(self) -> None:
+        gpio = self._gpio
+        if self._active and gpio is not None:
+            gpio.cleanup(tuple(self.pin_map.values()))
+
+
 def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
     """Adjust COM1 frequency within valid aviation band range.
 
@@ -252,7 +329,13 @@ def build_source(mode: int):
     return source
 
 
-def run_pfd_loop(pfd: DisplayPFD, source, mode: int, com1_tuner: Com1RotaryTuner | None = None) -> None:
+def run_pfd_loop(
+    pfd: DisplayPFD,
+    source,
+    mode: int,
+    com1_tuner: Com1RotaryTuner | None = None,
+    xplane_switch_panel: XPlaneGPIOSwitchPanel | None = None,
+) -> None:
     """Main display loop: poll telemetry, update PFD, process COM1 tuning.
 
     Continuously polls the telemetry source, updates aircraft state, and renders
@@ -263,6 +346,7 @@ def run_pfd_loop(pfd: DisplayPFD, source, mode: int, com1_tuner: Com1RotaryTuner
         source: Telemetry source (joystick, X-Plane, or MSP).
         mode: Operating mode constant.
         com1_tuner: Optional Com1RotaryTuner for GPIO-based frequency adjustment.
+        xplane_switch_panel: Optional GPIO button reader for mode 2 switch states.
 
     Raises:
         RuntimeError: If telemetry source encounters an error.
@@ -307,6 +391,11 @@ def run_pfd_loop(pfd: DisplayPFD, source, mode: int, com1_tuner: Com1RotaryTuner
                 state["com1_freq"] = _adjust_com_frequency(state["com1_freq"], steps, step_mhz)
                 print(f"COM1 -> {state['com1_freq']:.3f}")
 
+        if mode == MODE_XPLANE and xplane_switch_panel is not None and hasattr(source, "update_switch_states"):
+            switch_states = xplane_switch_panel.poll_changed()
+            if switch_states is not None:
+                source.update_switch_states(switch_states)
+
         pfd.update_display(
             state["airspeed"],
             state["altitude"],
@@ -334,19 +423,36 @@ def main() -> None:
     pfd = DisplayPFD()
     data_source = build_source(mode)
     com1_tuner = Com1RotaryTuner(pin_a=4, pin_b=17, pin_sw=27, pin_aux=22)
+    xplane_switch_panel = XPlaneGPIOSwitchPanel() if mode == MODE_XPLANE else None
 
     if com1_tuner.available:
         print("COM1 rotary tuning active on GPIO BCM A=4 B=17 SW=27 AUX=22")
     else:
         print("RPi.GPIO not available: COM1 rotary tuning disabled")
 
+    if xplane_switch_panel is not None:
+        if xplane_switch_panel.available:
+            print("Mode 2 GPIO switches active: battery/beacon/landing/taxi/nav/strobe/pitot")
+            if isinstance(data_source, XPlaneRealtimeSource):
+                data_source.update_switch_states(xplane_switch_panel.read_states())
+        else:
+            print("RPi.GPIO not available: mode 2 GPIO switches disabled")
+
     try:
-        run_pfd_loop(pfd, data_source, mode, com1_tuner=com1_tuner)
+        run_pfd_loop(
+            pfd,
+            data_source,
+            mode,
+            com1_tuner=com1_tuner,
+            xplane_switch_panel=xplane_switch_panel,
+        )
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
     finally:
         if hasattr(data_source, "stop"):
             data_source.stop()
+        if xplane_switch_panel is not None:
+            xplane_switch_panel.stop()
         com1_tuner.stop()
 
 

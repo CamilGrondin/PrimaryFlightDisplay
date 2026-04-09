@@ -220,6 +220,7 @@ class XPlaneRealtimeSource:
         self.data_queue: "queue.Queue[Dict[str, float]]" = queue.Queue(maxsize=200)
         self.error_queue: "queue.Queue[Exception]" = queue.Queue(maxsize=1)
         self.thread: Optional[threading.Thread] = None
+        self.simulator: Optional[Simulator] = None
 
     def start(self) -> None:
         """Start background thread to receive X-Plane UDP data."""
@@ -232,11 +233,13 @@ class XPlaneRealtimeSource:
     def _worker(self) -> None:
         """Background worker thread receiving X-Plane data."""
         try:
-            simulator = Simulator(ip=self.ip, port=self.port)
-            simulator.run(self.data_queue)
+            self.simulator = Simulator(ip=self.ip, port=self.port)
+            self.simulator.run(self.data_queue)
         except Exception as exc:
             if self.error_queue.empty():
                 self.error_queue.put(exc)
+        finally:
+            self.simulator = None
 
     def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float | bool]]:
         """Poll latest X-Plane data from queue.
@@ -273,6 +276,12 @@ class XPlaneRealtimeSource:
         enriched.setdefault("bug_heading", _normalize_heading(heading + 8.0))
         enriched.setdefault("bug_bearing", _normalize_heading(course + 95.0))
         return enriched
+
+    def update_switch_states(self, states: Dict[str, int]) -> None:
+        """Push GPIO switch states to the X-Plane simulator worker thread."""
+        simulator = self.simulator
+        if simulator is not None:
+            simulator.set_switch_states(states)
 
     def stop(self) -> None:
         pass
