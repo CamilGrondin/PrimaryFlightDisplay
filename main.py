@@ -66,6 +66,13 @@ class Com1RotaryTuner:
     def available(self) -> bool:
         return self._active
 
+    def read_snapshot(self) -> dict[str, int]:
+        if not self._active:
+            return {}
+        with self._lock:
+            a, b, sw, aux = self._read_snapshot()
+        return {"a": a, "b": b, "sw": sw, "aux": aux}
+
     def _read_ab_state(self) -> int:
         gpio = self._gpio
         if gpio is None:
@@ -203,6 +210,13 @@ class XPlaneGPIOSwitchPanel:
             states[name] = 1 if (raw == 0 if self.active_low else raw == 1) else 0
         return states
 
+    def read_raw_states(self) -> dict[str, int]:
+        gpio = self._gpio
+        if not self._active or gpio is None:
+            return {}
+
+        return {name: int(gpio.input(pin)) for name, pin in self.pin_map.items()}
+
     def poll_changed(self) -> dict[str, int] | None:
         if not self._active:
             return None
@@ -239,6 +253,38 @@ def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
     tuned = current + steps * step_mhz
     tuned = max(com_min, min(com_max, tuned))
     return round(tuned, 3)
+
+
+def _print_all_gpio_states(
+    com1_tuner: Com1RotaryTuner | None,
+    xplane_switch_panel: XPlaneGPIOSwitchPanel | None,
+) -> None:
+    chunks: list[str] = []
+
+    if com1_tuner is not None and com1_tuner.available:
+        snapshot = com1_tuner.read_snapshot()
+        if snapshot:
+            chunks.append(
+                "COM1 "
+                f"A(GPIO{com1_tuner.pin_a})={snapshot['a']} "
+                f"B(GPIO{com1_tuner.pin_b})={snapshot['b']} "
+                f"SW(GPIO{com1_tuner.pin_sw})={snapshot['sw']} "
+                f"AUX(GPIO{com1_tuner.pin_aux})={snapshot['aux']}"
+            )
+
+    if xplane_switch_panel is not None and xplane_switch_panel.available:
+        raw_states = xplane_switch_panel.read_raw_states()
+        logical_states = xplane_switch_panel.read_states()
+        if raw_states:
+            switch_chunks = []
+            for name, pin in xplane_switch_panel.pin_map.items():
+                raw_value = raw_states.get(name, -1)
+                logical_value = logical_states.get(name, 0)
+                switch_chunks.append(f"{name}(GPIO{pin})={raw_value}/logic={logical_value}")
+            chunks.append("SWITCH " + ", ".join(switch_chunks))
+
+    if chunks:
+        print("GPIO states -> " + " | ".join(chunks))
 
 
 def prompt_text(label: str, default: str | None = None) -> str:
@@ -335,6 +381,8 @@ def run_pfd_loop(
     mode: int,
     com1_tuner: Com1RotaryTuner | None = None,
     xplane_switch_panel: XPlaneGPIOSwitchPanel | None = None,
+    print_gpio_states: bool = True,
+    gpio_print_interval_s: float = 0.5,
 ) -> None:
     """Main display loop: poll telemetry, update PFD, process COM1 tuning.
 
@@ -347,6 +395,8 @@ def run_pfd_loop(
         mode: Operating mode constant.
         com1_tuner: Optional Com1RotaryTuner for GPIO-based frequency adjustment.
         xplane_switch_panel: Optional GPIO button reader for mode 2 switch states.
+        print_gpio_states: If True, prints all GPIO states in loop.
+        gpio_print_interval_s: Interval in seconds between GPIO state prints.
 
     Raises:
         RuntimeError: If telemetry source encounters an error.
@@ -371,6 +421,7 @@ def run_pfd_loop(
         "bug_heading": 0.0,
         "bug_bearing": 0.0,
     }
+    last_gpio_print_t = 0.0
 
     while True:
         if mode == MODE_JOYSTICK:
@@ -395,6 +446,12 @@ def run_pfd_loop(
             switch_states = xplane_switch_panel.poll_changed()
             if switch_states is not None:
                 source.update_switch_states(switch_states)
+
+        if print_gpio_states:
+            now = time.monotonic()
+            if now - last_gpio_print_t >= gpio_print_interval_s:
+                last_gpio_print_t = now
+                _print_all_gpio_states(com1_tuner, xplane_switch_panel)
 
         pfd.update_display(
             state["airspeed"],
@@ -439,12 +496,15 @@ def main() -> None:
             print("RPi.GPIO not available: mode 2 GPIO switches disabled")
 
     try:
+        print("GPIO state print loop active (interval 0.5s)")
         run_pfd_loop(
             pfd,
             data_source,
             mode,
             com1_tuner=com1_tuner,
             xplane_switch_panel=xplane_switch_panel,
+            print_gpio_states=True,
+            gpio_print_interval_s=0.5,
         )
     except KeyboardInterrupt:
         print("\nProgram interrupted by user")
