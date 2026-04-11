@@ -46,10 +46,12 @@ class AltitudeIndicator:
         self.command_font_size = int(self.size // 10.5)
         self.label_font = pygame.font.SysFont("helvetica", int(self.size // 18.0), bold=True)
         self.units_font = pygame.font.SysFont("helvetica", int(self.size // 23.0), bold=True)
+        self.baro_value_font = pygame.font.SysFont("helvetica", int(self.size // 18.0), bold=True)
         self.command_position = (
             self.background_rect.left + int(self.size // 100.0),
             self.background_rect.top - int(self.size // 9.0),
         )
+        self.baro_hpa = 1013.0
         self.digit_font_size1 = int(self.size // 15.5)
         self.digit_font_size2 = int(self.size // 19.5)
 
@@ -106,11 +108,17 @@ class AltitudeIndicator:
         # )
 
         ### render rectangle
+        self.baro_rect = pygame.Rect(0, 0, int(self.width * 1.45), int(self.size // 14.0))
+        self.baro_rect.midtop = (
+            int(self.background_rect.centerx),
+            int(self.background_rect.bottom + self.size / 85.0),
+        )
+
         x = self.background_rect.x - self.box_size * 0.33 - 5
         y = self.background_rect.y - 38 - 5
         w = self.width + self.box_size * 0.67 + 10
         h = self.height + 38 + 10
-        self.render_rect = pygame.Rect(x, y, w, h)
+        self.render_rect = pygame.Rect(x, y, w, h).union(self.baro_rect.inflate(6, 6))
 
     @staticmethod
     def draw_altitude_number(screen: pygame.Surface, altitude: float, size: int, **kwargs) -> pygame.Rect:
@@ -272,7 +280,18 @@ class AltitudeIndicator:
         units_rect.midbottom = (self.background_rect.centerx, self.background_rect.bottom - self.size / 40)
         self.screen.blit(units, units_rect)
 
-    def update(self, altitude: float, command: float = None):
+    def draw_baro_setting(self) -> None:
+        pygame.draw.rect(self.screen, PFD_COLORS["panel_bg_dark"], self.baro_rect)
+        pygame.draw.rect(self.screen, PFD_COLORS["text_primary"], self.baro_rect, width=self.line_width2)
+
+        value = self.baro_value_font.render(f"{int(round(self.baro_hpa)):04d} HPA", True, PFD_COLORS["cyan"])
+
+        value_rect = value.get_rect()
+        value_rect.center = self.baro_rect.center
+
+        self.screen.blit(value, value_rect)
+
+    def update(self, altitude: float, command: float = None, baro_hpa: float | None = None):
         # self.altitude = np.clip(altitude, 0.0, None)
         self.altitude = altitude
 
@@ -281,6 +300,9 @@ class AltitudeIndicator:
         else:
             # self.command = np.clip(command, 0.0, None)
             self.command = command
+
+        if baro_hpa is not None:
+            self.baro_hpa = float(baro_hpa)
 
         self.bar_min_altitude = self.altitude - self.indicator_range
         self.bar_max_altitude = self.altitude + self.indicator_range
@@ -292,6 +314,7 @@ class AltitudeIndicator:
         self.draw_border_lines()
         self.draw_digits_display()
         self.draw_label()
+        self.draw_baro_setting()
         if not self.command is None:
             self.draw_command_mark()
         return self.render_rect

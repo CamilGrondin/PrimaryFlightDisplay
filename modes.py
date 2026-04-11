@@ -15,6 +15,10 @@ from simulator import Simulator
 
 logger = logging.getLogger(__name__)
 
+
+TelemetryValue = float | int | bool | str
+TelemetryDict = Dict[str, TelemetryValue]
+
 try:
     import serial  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
@@ -53,8 +57,12 @@ class Telemetry:
 
     bug_heading: float = 0.0
     bug_bearing: float = 0.0
+    next_point: str = "DIRECT"
+    next_distance_nm: float = 0.0
+    next_bearing_deg: float = 0.0
+    baro_hpa: float = 1013.0
 
-    def as_dict(self) -> Dict[str, float | bool]:
+    def as_dict(self) -> TelemetryDict:
         return {
             "airspeed": self.airspeed,
             "altitude": self.altitude,
@@ -74,6 +82,10 @@ class Telemetry:
             "ap_vs": self.ap_vs,
             "bug_heading": self.bug_heading,
             "bug_bearing": self.bug_bearing,
+            "next_point": self.next_point,
+            "next_distance_nm": self.next_distance_nm,
+            "next_bearing_deg": self.next_bearing_deg,
+            "baro_hpa": self.baro_hpa,
         }
 
 
@@ -96,38 +108,45 @@ class JoystickManualSource:
     including bank-to-turn calculation and speed ramping.
     """
 
-    def __init__(self, joystick_name_hint: str | None = None) -> None:
+    def __init__(self, joystick_name_hint: str | None = None, control_device: str = "auto") -> None:
         """Initialize joystick input handler.
 
         Args:
             joystick_name_hint: Substring to match joystick name (default from config).
+            control_device: Input preference for mode 1: auto, joystick, keyboard.
 
         Raises:
-            RuntimeError: If no joystick is detected or initialization fails.
+            RuntimeError: If joystick is required but none is detected.
         """
         joystick_cfg = Config.joystick
         command_cfg = Config.commands
         name_hint = joystick_name_hint or joystick_cfg.name_hint
 
+        device = control_device.strip().lower()
+        if device not in {"auto", "joystick", "keyboard"}:
+            raise ValueError("control_device must be one of: auto, joystick, keyboard")
+
         pygame.joystick.init()
         count = pygame.joystick.get_count()
-        if count <= 0:
-            raise RuntimeError("No joystick detected. Connect a joystick and restart.")
 
         selected = None
-        for idx in range(count):
-            candidate = pygame.joystick.Joystick(idx)
-            candidate.init()
-            if name_hint.lower() in candidate.get_name().lower():
-                selected = candidate
-                break
-            if selected is None:
-                selected = candidate
+        if device != "keyboard" and count > 0:
+            for idx in range(count):
+                candidate = pygame.joystick.Joystick(idx)
+                candidate.init()
+                if name_hint.lower() in candidate.get_name().lower():
+                    selected = candidate
+                    break
+                if selected is None:
+                    selected = candidate
 
-        if selected is None:
-            raise RuntimeError("Unable to initialize joystick.")
+        if device == "joystick" and selected is None:
+            raise RuntimeError("No joystick detected. Connect a joystick and restart.")
 
         self.joystick = selected
+        self.input_mode = "joystick" if self.joystick is not None else "keyboard"
+        self._keyboard_throttle = 0.5
+        self.keyboard_throttle_rate = 0.6
         self.telemetry = Telemetry(
             airspeed=joystick_cfg.default_airspeed,
             altitude=joystick_cfg.default_altitude,
@@ -137,6 +156,10 @@ class JoystickManualSource:
             nav2_freq=Config.frequencies.nav2,
             com1_freq=Config.frequencies.com1,
             com2_freq=Config.frequencies.com2,
+            next_point=Config.commands.next_point,
+            next_distance_nm=float(Config.commands.next_distance_nm),
+            next_bearing_deg=float(Config.commands.next_bearing_deg),
+            baro_hpa=float(Config.commands.baro_hpa),
         )
         self.last_t = time.monotonic()
         self.bank_deadzone_deg = joystick_cfg.bank_deadzone_deg
@@ -147,7 +170,10 @@ class JoystickManualSource:
         self.heading_offset_deg = command_cfg.heading_offset_deg
         self.bearing_offset_deg = command_cfg.bearing_offset_deg
 
-        logger.info("Manual mode joystick: %s", self.joystick.get_name())
+        if self.input_mode == "joystick" and self.joystick is not None:
+            logger.info("Manual mode joystick: %s", self.joystick.get_name())
+        else:
+            logger.info("Manual mode keyboard active")
 
     def _axis(self, index: int, default: float = 0.0) -> float:
         """Read joystick axis value with bounds checking.
@@ -159,11 +185,49 @@ class JoystickManualSource:
         Returns:
             Axis value in [-1.0, 1.0] or default if missing.
         """
+        if self.joystick is None:
+            return default
         if index >= self.joystick.get_numaxes():
             return default
         return float(self.joystick.get_axis(index))
 
-    def poll(self) -> Dict[str, float | bool]:
+    def _read_joystick_controls(self) -> tuple[float, float, float]:
+        pygame.event.pump()
+
+        roll_axis = self._axis(0)
+        pitch_axis = self._axis(1)
+        throttle_axis = -self._axis(2)
+        throttle = (throttle_axis + 1.0) / 2.0
+        return roll_axis, pitch_axis, throttle
+
+    def _read_keyboard_controls(self, dt: float) -> tuple[float, float, float]:
+        pygame.event.pump()
+        keys = pygame.key.get_pressed()
+
+        roll_axis = 0.0
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            roll_axis -= 1.0
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            roll_axis += 1.0
+
+        pitch_axis = 0.0
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            pitch_axis -= 1.0
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            pitch_axis += 1.0
+
+        if keys[pygame.K_r] or keys[pygame.K_PAGEUP]:
+            self._keyboard_throttle = min(1.0, self._keyboard_throttle + self.keyboard_throttle_rate * dt)
+        if keys[pygame.K_f] or keys[pygame.K_PAGEDOWN]:
+            self._keyboard_throttle = max(0.0, self._keyboard_throttle - self.keyboard_throttle_rate * dt)
+        if keys[pygame.K_HOME]:
+            self._keyboard_throttle = 1.0
+        if keys[pygame.K_END]:
+            self._keyboard_throttle = 0.0
+
+        return roll_axis, pitch_axis, self._keyboard_throttle
+
+    def poll(self) -> TelemetryDict:
         """Poll joystick and compute simulated aircraft state.
 
         Processes joystick input and applies physics-based aircraft dynamics.
@@ -171,17 +235,14 @@ class JoystickManualSource:
         Returns:
             Dictionary with telemetry data (airspeed, altitude, heading, etc.).
         """
-        pygame.event.pump()
-
         now = time.monotonic()
         dt = max(0.001, now - self.last_t)
         self.last_t = now
 
-        roll_axis = self._axis(0)
-        pitch_axis = self._axis(1)
-        throttle_axis = -self._axis(2)
-
-        throttle = (throttle_axis + 1.0) / 2.0
+        if self.input_mode == "joystick" and self.joystick is not None:
+            roll_axis, pitch_axis, throttle = self._read_joystick_controls()
+        else:
+            roll_axis, pitch_axis, throttle = self._read_keyboard_controls(dt)
 
         self.telemetry.roll = 60.0 * roll_axis
         self.telemetry.pitch = 30.0 * pitch_axis
@@ -216,10 +277,11 @@ class JoystickManualSource:
         return self.telemetry.as_dict()
 
     def stop(self) -> None:
-        try:
-            self.joystick.quit()
-        except Exception:
-            pass
+        if self.joystick is not None:
+            try:
+                self.joystick.quit()
+            except Exception:
+                pass
 
 
 class XPlaneRealtimeSource:
@@ -238,7 +300,7 @@ class XPlaneRealtimeSource:
         """
         self.ip = ip
         self.port = port
-        self.data_queue: "queue.Queue[Dict[str, float]]" = queue.Queue(maxsize=200)
+        self.data_queue: "queue.Queue[TelemetryDict]" = queue.Queue(maxsize=200)
         self.error_queue: "queue.Queue[Exception]" = queue.Queue(maxsize=1)
         self.thread: Optional[threading.Thread] = None
         self.simulator: Optional[Simulator] = None
@@ -264,7 +326,7 @@ class XPlaneRealtimeSource:
         finally:
             self.simulator = None
 
-    def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float | bool]]:
+    def poll(self, timeout: float = 0.05) -> Optional[TelemetryDict]:
         """Poll latest X-Plane data from queue.
 
         Args:
@@ -298,6 +360,10 @@ class XPlaneRealtimeSource:
         enriched.setdefault("ap_vs", abs(vertical_speed) > Config.commands.ap_vs_threshold)
         enriched.setdefault("bug_heading", _normalize_heading(heading + Config.commands.heading_offset_deg))
         enriched.setdefault("bug_bearing", _normalize_heading(course + Config.commands.bearing_offset_deg))
+        enriched.setdefault("next_point", Config.commands.next_point)
+        enriched.setdefault("next_distance_nm", float(Config.commands.next_distance_nm))
+        enriched.setdefault("next_bearing_deg", course)
+        enriched.setdefault("baro_hpa", float(Config.commands.baro_hpa))
         return enriched
 
     def update_switch_states(self, states: Dict[str, int]) -> None:
@@ -446,7 +512,7 @@ class MSPRealtimeSource:
         self.port = port
         self.baudrate = baudrate
         self.timeout = Config.msp.timeout if timeout is None else timeout
-        self.data_queue: "queue.Queue[Dict[str, float]]" = queue.Queue(maxsize=200)
+        self.data_queue: "queue.Queue[TelemetryDict]" = queue.Queue(maxsize=200)
         self.error_queue: "queue.Queue[Exception]" = queue.Queue(maxsize=1)
         self.thread: Optional[threading.Thread] = None
         self._running = threading.Event()
@@ -480,6 +546,10 @@ class MSPRealtimeSource:
                 nav2_freq=Config.frequencies.nav2,
                 com1_freq=Config.frequencies.com1,
                 com2_freq=Config.frequencies.com2,
+                next_point=Config.commands.next_point,
+                next_distance_nm=float(Config.commands.next_distance_nm),
+                next_bearing_deg=float(Config.commands.next_bearing_deg),
+                baro_hpa=float(Config.commands.baro_hpa),
             )
 
             while self._running.is_set():
@@ -520,7 +590,7 @@ class MSPRealtimeSource:
             if client is not None:
                 client.close()
 
-    def poll(self, timeout: float = 0.05) -> Optional[Dict[str, float | bool]]:
+    def poll(self, timeout: float = 0.05) -> Optional[TelemetryDict]:
         """Poll latest MSP data from queue.
 
         Args:

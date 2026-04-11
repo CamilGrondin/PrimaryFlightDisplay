@@ -52,6 +52,7 @@ A Primary Flight Display (PFD) interface created with Pygame for real-time visua
 The application supports three runtime modes, selectable by CLI argument or interactive prompt fallback:
 
 - Mode 1: Manual control with joystick (Saitek X52 preferred)
+    - Also supports keyboard control
 - Mode 2: Real-time X-Plane data through UDP
 - Mode 3: IMU data from a flight controller through MSP (serial)
 
@@ -66,11 +67,17 @@ The main loop can tune COM1 with a PT65 301 rotary encoder on BCM GPIO pins:
 
 Rotation updates COM1 frequency in 25 kHz steps by default. Holding SW (22) or AUX (4) enables coarse 1 MHz steps.
 
+If the application is not running on a Raspberry Pi, mode 2 automatically uses a simulated switch panel.
+Press keys `1..7` to toggle battery, beacon, landing, taxi, nav, strobe, and pitot heat.
+
 Examples:
 
 ```bash
 # Mode 1: Joystick
 python3 main.py --mode 1 --joystick-name X52
+
+# Mode 1: Keyboard only
+python3 main.py --mode 1 --control-device keyboard
 
 # Mode 2: X-Plane UDP
 python3 main.py --mode 2 --xplane-ip 127.0.0.1 --xplane-port 49000
@@ -84,6 +91,11 @@ python3 main.py --mode 2 --verbose
 # Disable periodic GPIO diagnostics
 python3 main.py --mode 2 --no-gpio-print
 ```
+
+Mode 1 keyboard controls:
+- Roll: `A/D` or Left/Right arrows
+- Pitch: `W/S` or Up/Down arrows
+- Throttle: `R/F`, `PageUp/PageDown`, `Home` (max), `End` (min)
 
 Below is an example demonstrating how to use the PFD interface with `AircraftState` and `PrimaryFlightDisplay`:
 

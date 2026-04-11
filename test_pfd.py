@@ -23,7 +23,8 @@ from config import (
     MSPConfig,
 )
 from main import Com1RotaryTuner, _adjust_com_frequency, parse_args, prompt_text, prompt_int, choose_mode
-from modes import MSPRealtimeSource, Telemetry, XPlaneRealtimeSource, _normalize_heading
+from modes import JoystickManualSource, MSPRealtimeSource, Telemetry, XPlaneRealtimeSource, _normalize_heading
+from simulator import Simulator
 
 
 class TestCOMFrequencyAdjustment(unittest.TestCase):
@@ -105,6 +106,10 @@ class TestTelemetryDataStructure(unittest.TestCase):
         self.assertAlmostEqual(t.com1_freq, 121.800, places=3)
         self.assertTrue(t.ap_gps)
         self.assertFalse(t.ap_vs)
+        self.assertEqual(t.next_point, "DIRECT")
+        self.assertEqual(t.next_distance_nm, 0.0)
+        self.assertEqual(t.next_bearing_deg, 0.0)
+        self.assertEqual(int(t.baro_hpa), 1013)
 
     def test_telemetry_custom_values(self):
         """Test telemetry with custom initialization."""
@@ -154,6 +159,10 @@ class TestTelemetryDataStructure(unittest.TestCase):
             "ap_vs",
             "bug_heading",
             "bug_bearing",
+            "next_point",
+            "next_distance_nm",
+            "next_bearing_deg",
+            "baro_hpa",
         ]
         for key in expected_keys:
             self.assertIn(key, d)
@@ -265,6 +274,12 @@ class TestCommandDefaults(unittest.TestCase):
         self.assertGreater(cmd.altitude_cmd, 0)
         self.assertAlmostEqual(cmd.heading_offset_deg % 360, cmd.heading_offset_deg % 360)
         self.assertGreater(cmd.ap_vs_threshold, 0)
+        self.assertTrue(cmd.next_point)
+        self.assertGreaterEqual(cmd.next_distance_nm, 0)
+        self.assertGreaterEqual(cmd.next_bearing_deg, 0)
+        self.assertLess(cmd.next_bearing_deg, 360)
+        self.assertGreaterEqual(cmd.baro_hpa, 900)
+        self.assertLessEqual(cmd.baro_hpa, 1100)
 
     def test_altitude_command_is_high(self):
         """Test default altitude command is typical cruise altitude."""
@@ -338,6 +353,24 @@ class TestCliParsing(unittest.TestCase):
         self.assertTrue(args.no_gpio_print)
         self.assertAlmostEqual(args.gpio_print_interval, 0.25, places=2)
 
+    def test_parse_args_control_device_keyboard(self):
+        args = parse_args(["--mode", "1", "--control-device", "keyboard"])
+        self.assertEqual(args.control_device, "keyboard")
+
+
+class TestMode1InputSelection(unittest.TestCase):
+    """Test joystick/keyboard input selection behavior for mode 1."""
+
+    def test_keyboard_mode_fallback_when_no_joystick(self):
+        with patch("modes.pygame.joystick.get_count", return_value=0):
+            source = JoystickManualSource(control_device="keyboard")
+            self.assertEqual(source.input_mode, "keyboard")
+
+    def test_joystick_mode_requires_joystick(self):
+        with patch("modes.pygame.joystick.get_count", return_value=0):
+            with self.assertRaises(RuntimeError):
+                JoystickManualSource(control_device="joystick")
+
 
 class TestCom1RotarySelection(unittest.TestCase):
     """Test rotary encoder step mode selection."""
@@ -391,6 +424,36 @@ class TestSourceLifecycle(unittest.TestCase):
         source = MSPRealtimeSource(port="/dev/null", baudrate=115200)
         source.stop()
         self.assertIsNone(source.thread)
+
+
+class TestXPlaneDataRefs(unittest.TestCase):
+    """Regression tests for X-Plane dataref subscriptions."""
+
+    def test_roll_dataref_is_subscribed(self):
+        simulator = Simulator(ip="127.0.0.1", port=49000)
+        try:
+            self.assertIn("roll", simulator.datarefs)
+            self.assertEqual(simulator.datarefs["roll"][1], b"sim/flightmodel/position/phi\0")
+            self.assertIn("gps_distance_nm", simulator.datarefs)
+            self.assertIn("gps_bearing_deg_mag", simulator.datarefs)
+            self.assertIn("gps2_distance_nm", simulator.datarefs)
+            self.assertIn("gps2_bearing_deg_mag", simulator.datarefs)
+            self.assertIn("baro_inhg", simulator.datarefs)
+            self.assertIn("gps_nav_id_0", simulator.datarefs)
+            self.assertIn("gps2_nav_id_0", simulator.datarefs)
+            self.assertIn("gps_dme_id_0", simulator.datarefs)
+            self.assertIn("gps2_dme_id_0", simulator.datarefs)
+            self.assertIn("ap_servos_on", simulator.datarefs)
+            self.assertIn("ap_nav_status", simulator.datarefs)
+            self.assertIn("ap_gpss_status", simulator.datarefs)
+            self.assertIn("ap_heading_is_gpss", simulator.datarefs)
+            self.assertIn("ap_altitude_hold_status", simulator.datarefs)
+            self.assertIn("ap_alts_armed", simulator.datarefs)
+            self.assertIn("ap_alts_captured", simulator.datarefs)
+            self.assertIn("ap_vvi_status", simulator.datarefs)
+            self.assertIn("ap_alt_vvi_is_showing_vvi", simulator.datarefs)
+        finally:
+            simulator.stop()
 
 
 class TestModeConstants(unittest.TestCase):

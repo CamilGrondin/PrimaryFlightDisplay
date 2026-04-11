@@ -122,11 +122,11 @@ class AirspeedIndicator:
                 self.background.blit(airspeed_num, airspeed_num_rect)
 
     def draw_speed_bands(self) -> None:
+        # DA40 typical IAS limits (KIAS): Vso 49, Vs1 59, Vfe 91, Vno 129, Vne 178.
         bands = [
-            (40, 80, (245, 245, 245)),
-            (80, 140, PFD_COLORS["green"]),
-            (140, 160, PFD_COLORS["warning"]),
-            (160, 220, PFD_COLORS["danger"]),
+            (49, 91, (245, 245, 245)),
+            (59, 129, PFD_COLORS["green"]),
+            (129, 178, PFD_COLORS["warning"]),
         ]
         x = self.background_rect.size[0] - self.width / 14
         w = self.width / 16
@@ -137,6 +137,16 @@ class AirspeedIndicator:
             if h <= 0:
                 continue
             pygame.draw.rect(self.background, color, pygame.Rect(x, top, w, h))
+
+        # VNE red radial marker.
+        vne = 178.0
+        y_vne = self.vmid + (self.airspeed - vne) * self.airspeed2heigth
+        red_h = max(2, int(self.line_width3 * 1.5))
+        pygame.draw.rect(
+            self.background,
+            PFD_COLORS["danger"],
+            pygame.Rect(x, y_vne - red_h / 2, w, red_h),
+        )
 
     def draw_digits_display(self) -> None:
         pygame.draw.polygon(self.screen, PFD_COLORS["panel_bg_dark"], self.box_poly)

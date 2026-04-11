@@ -93,11 +93,11 @@ Les docstrings enrichissent :
 ## 3. Suite de Tests (`test_pfd.py`)
 
 ### 📝 Description
-45 tests unitaires couvrant les fonctions critiques.
+48 tests unitaires couvrant les fonctions critiques.
 
 ### ✅ Résultats
 ```
-Ran 45 tests in 0.059s
+Ran 48 tests in 0.076s
 OK
 ```
 
@@ -187,7 +187,7 @@ test_pfd.py
 | Fichier | Type | Changement |
 |---------|------|-----------|
 | `config.py` | ✨ Créé | Gestion centralisée configuration |
-| `test_pfd.py` | ✨ Créé | 45 tests unitaires |
+| `test_pfd.py` | ✨ Créé | 48 tests unitaires |
 | `main.py` | 📝 Modifié | Docstrings ajoutées |
 | `display.py` | 📝 Modifié | Docstrings + type hints |
 | `modes.py` | 📝 Modifié | Docstrings détaillées |

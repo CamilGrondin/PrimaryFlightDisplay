@@ -16,7 +16,7 @@ Affiche des démonstrations pratiques de :
 
 ### 2. Lancer les tests
 ```bash
-# Tous les tests (45)
+# Tous les tests (48)
 python3 -m unittest test_pfd -v
 
 # Un test spécifique
@@ -47,6 +47,9 @@ Le programme accepte maintenant des options CLI. Si une option manque, un prompt
 # Mode 1: joystick
 python3 main.py --mode 1 --joystick-name X52
 
+# Mode 1: clavier uniquement
+python3 main.py --mode 1 --control-device keyboard
+
 # Mode 2: X-Plane
 python3 main.py --mode 2 --xplane-ip 127.0.0.1 --xplane-port 49000
 
@@ -56,6 +59,15 @@ python3 main.py --mode 3 --msp-port /dev/tty.usbserial --msp-baud 115200
 # Logging debug + pas de dump GPIO periodique
 python3 main.py --mode 2 --verbose --no-gpio-print
 ```
+
+Mode 1 clavier:
+- Roulis: `A/D` ou fleches Gauche/Droite
+- Tangage: `W/S` ou fleches Haut/Bas
+- Gaz: `R/F`, `PageUp/PageDown`, `Home` (max), `End` (min)
+
+Mode 2 hors Raspberry Pi:
+- Le panneau de switches GPIO est simule automatiquement
+- Touches `1..7` pour basculer battery, beacon, landing, taxi, nav, strobe, pitot
 
 ---
 
@@ -155,7 +167,7 @@ _adjust_com_frequency(  # ← L'IDE affiche la signature complète
 ### (3) Suite de Tests Complète - `test_pfd.py`
 
 **Qu'est-ce que c'est ?**
-45 tests unitaires qui vérifient que les fonctions critiques fonctionnent correctement et qu'aucun changement ne les casse.
+48 tests unitaires qui vérifient que les fonctions critiques fonctionnent correctement et qu'aucun changement ne les casse.
 
 **Où les voir ?**
 ```bash
@@ -171,7 +183,7 @@ python3 -m unittest test_pfd -v
 | Télémétrie | 4 | Défauts, customs, sérialisation |
 | Configuration | 7 | Valeurs, import/export, validation |
 | Autres (écran, radios, modes) | 6 | Complétude |
-| **TOTAL** | **45** | ✅ 100% passing |
+| **TOTAL** | **48** | ✅ 100% passing |
 
 **Exemple de test :**
 ```python
@@ -205,7 +217,7 @@ coverage report
 | Fichier | Création | Description |
 |---------|----------|-------------|
 | `config.py` | ✨ Nouveau | Gestion centralisée de configuration |
-| `test_pfd.py` | ✨ Nouveau | 45 tests unitaires |
+| `test_pfd.py` | ✨ Nouveau | 48 tests unitaires |
 | `demo_improvements.py` | ✨ Nouveau | Démonstration des améliorations |
 | `IMPROVEMENTS.md` | ✨ Nouveau | Guide détaillé des améliorations |
 | `main.py` | 📝 Mis à jour | Docstrings ajoutées |

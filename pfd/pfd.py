@@ -50,6 +50,10 @@ class AircraftState:
     ap_vs: bool = False
     bug_heading: float = 0.0
     bug_bearing: float = 0.0
+    next_point: str = "DIRECT"
+    next_distance_nm: float = 0.0
+    next_bearing_deg: float = 0.0
+    baro_hpa: float = 1013.0
 
 
 class PrimaryFlightDisplay:
@@ -140,10 +144,14 @@ class PrimaryFlightDisplay:
             ap_vs=state.ap_vs,
             bug_heading=state.bug_heading,
             bug_bearing=state.bug_bearing,
+            next_point=state.next_point,
+            next_distance_nm=state.next_distance_nm,
+            next_bearing_deg=state.next_bearing_deg,
+            baro_hpa=state.baro_hpa,
         )
         self.artifical_horizon.update(state.roll, state.pitch)
         self.airspeed_indicator.update(state.airspeed, state.airspeed_cmd)
-        self.altitude_indicator.update(state.altitude, state.altitude_cmd)
+        self.altitude_indicator.update(state.altitude, state.altitude_cmd, state.baro_hpa)
         self.vspeed_indicator.update(state.vspeed)
         self.heading_indicator.update(state.heading, state.course, state.heading_cmd)
 

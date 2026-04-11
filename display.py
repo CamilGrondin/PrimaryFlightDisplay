@@ -49,6 +49,10 @@ class DisplayPFD:
         ap_vs: bool = False,
         bug_heading: float | None = None,
         bug_bearing: float | None = None,
+        next_point: str | None = None,
+        next_distance_nm: float | None = None,
+        next_bearing_deg: float | None = None,
+        baro_hpa: int | float | None = None,
     ) -> None:
         """Update and render the Primary Flight Display with current aircraft state.
 
@@ -70,6 +74,10 @@ class DisplayPFD:
             ap_vs: Autopilot vertical speed mode active (default: False).
             bug_heading: Heading bug position in degrees (defaults to heading).
             bug_bearing: Bearing bug position in degrees (defaults to course).
+            next_point: Next route point identifier for top panel.
+            next_distance_nm: Next route point distance in nautical miles.
+            next_bearing_deg: Next route point bearing in magnetic degrees.
+            baro_hpa: Altimeter setting in hPa for altitude indicator.
         """
         t = time.time() - self.t0
         if course is None:
@@ -87,6 +95,14 @@ class DisplayPFD:
             com1_freq = self.frequency_defaults.com1
         if com2_freq is None:
             com2_freq = self.frequency_defaults.com2
+        if next_point is None:
+            next_point = self.command_defaults.next_point
+        if next_distance_nm is None:
+            next_distance_nm = self.command_defaults.next_distance_nm
+        if next_bearing_deg is None:
+            next_bearing_deg = self.command_defaults.next_bearing_deg
+        if baro_hpa is None:
+            baro_hpa = self.command_defaults.baro_hpa
 
         state = AircraftState(
             pitch=pitch,
@@ -109,6 +125,10 @@ class DisplayPFD:
             ap_vs=ap_vs,
             bug_heading=bug_heading,
             bug_bearing=bug_bearing,
+            next_point=next_point,
+            next_distance_nm=float(next_distance_nm),
+            next_bearing_deg=float(next_bearing_deg),
+            baro_hpa=float(baro_hpa),
         )
 
         self.PFD.update(state, t)

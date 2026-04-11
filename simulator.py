@@ -2,6 +2,7 @@ import struct
 import socket
 import threading
 import logging
+import math
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class Simulator:
             "heading": (4, b'sim/cockpit2/gauges/indicators/heading_electric_deg_mag_pilot\0'),
 
             "pitch": (5, b'sim/cockpit2/gauges/indicators/pitch_electric_deg_pilot\0'),
+            "roll": (15, b'sim/flightmodel/position/phi\0'),
 
             "battery_switch": (6, b'sim/cockpit/electrical/battery_on\0'),
 
@@ -41,7 +43,49 @@ class Simulator:
             "nav_lights": (12, b'sim/cockpit2/switches/navigation_lights_on\0'),
             "strobe_lights": (13, b'sim/cockpit2/switches/strobe_lights_on\0'),
             "pitot_heat": (14, b'sim/cockpit/switches/pitot_heat_on\0'),
+            "gps_distance_nm": (16, b'sim/cockpit2/radios/indicators/gps_dme_distance_nm\0'),
+            "gps_bearing_deg_mag": (17, b'sim/cockpit2/radios/indicators/gps_bearing_deg_mag\0'),
+            "gps2_distance_nm": (18, b'sim/cockpit2/radios/indicators/gps2_dme_distance_nm\0'),
+            "gps2_bearing_deg_mag": (19, b'sim/cockpit2/radios/indicators/gps2_bearing_deg_mag\0'),
+            "baro_inhg": (20, b'sim/cockpit2/gauges/actuators/barometer_setting_in_hg_pilot\0'),
+            "ap_servos_on": (21, b'sim/cockpit2/autopilot/servos_on\0'),
+            "ap_nav_status": (22, b'sim/cockpit2/autopilot/nav_status\0'),
+            "ap_gpss_status": (23, b'sim/cockpit2/autopilot/gpss_status\0'),
+            "ap_heading_is_gpss": (24, b'sim/cockpit2/autopilot/heading_is_gpss\0'),
+            "ap_altitude_hold_status": (25, b'sim/cockpit2/autopilot/altitude_hold_status\0'),
+            "ap_alts_armed": (26, b'sim/cockpit2/autopilot/alts_armed\0'),
+            "ap_alts_captured": (27, b'sim/cockpit2/autopilot/alts_captured\0'),
+            "ap_vvi_status": (28, b'sim/cockpit2/autopilot/vvi_status\0'),
+            "ap_alt_vvi_is_showing_vvi": (29, b'sim/cockpit2/autopilot/alt_vvi_is_showing_vvi\0'),
         }
+
+        self._gps_nav_id_keys = []
+        for index in range(8):
+            key = f"gps_nav_id_{index}"
+            path = f"sim/cockpit2/radios/indicators/gps_nav_id[{index}]\0".encode("ascii")
+            self.datarefs[key] = (30 + index, path)
+            self._gps_nav_id_keys.append(key)
+
+        self._gps2_nav_id_keys = []
+        for index in range(8):
+            key = f"gps2_nav_id_{index}"
+            path = f"sim/cockpit2/radios/indicators/gps2_nav_id[{index}]\0".encode("ascii")
+            self.datarefs[key] = (40 + index, path)
+            self._gps2_nav_id_keys.append(key)
+
+        self._gps_dme_id_keys = []
+        for index in range(8):
+            key = f"gps_dme_id_{index}"
+            path = f"sim/cockpit2/radios/indicators/gps_dme_id[{index}]\0".encode("ascii")
+            self.datarefs[key] = (50 + index, path)
+            self._gps_dme_id_keys.append(key)
+
+        self._gps2_dme_id_keys = []
+        for index in range(8):
+            key = f"gps2_dme_id_{index}"
+            path = f"sim/cockpit2/radios/indicators/gps2_dme_id[{index}]\0".encode("ascii")
+            self.datarefs[key] = (60 + index, path)
+            self._gps2_dme_id_keys.append(key)
 
         self.breaker_states = {
             "PWR": 0,
@@ -164,6 +208,64 @@ class Simulator:
             results[idx] = value
         return results
 
+    def _read_scalar(self, results, key):
+        idx = self.datarefs[key][0]
+        value = results.get(idx)
+        if value is None:
+            return None
+        value = float(value)
+        if not math.isfinite(value):
+            return None
+        return value
+
+    def _decode_nav_id(self, results, keys):
+        chars = []
+        for key in keys:
+            value = self._read_scalar(results, key)
+            if value is None:
+                return ""
+            code = int(round(value))
+            if code == 0:
+                break
+            if 32 <= code <= 126:
+                chars.append(chr(code))
+            else:
+                return ""
+        ident = "".join(chars).strip().upper()
+        return ident
+
+    def _extract_next_point(self, results):
+        for keys in (
+            self._gps_nav_id_keys,
+            self._gps2_nav_id_keys,
+            self._gps_dme_id_keys,
+            self._gps2_dme_id_keys,
+        ):
+            ident = self._decode_nav_id(results, keys)
+            if ident:
+                return ident
+        return None
+
+    def _extract_next_distance_nm(self, results):
+        for key in ("gps_distance_nm", "gps2_distance_nm"):
+            value = self._read_scalar(results, key)
+            if value is not None and value > 0.0:
+                return value
+        return None
+
+    def _extract_next_bearing_deg(self, results):
+        for key in ("gps_bearing_deg_mag", "gps2_bearing_deg_mag"):
+            value = self._read_scalar(results, key)
+            if value is not None:
+                return value % 360.0
+        return None
+
+    def _extract_baro_hpa(self, results):
+        inhg = self._read_scalar(results, "baro_inhg")
+        if inhg is None or inhg <= 0.0:
+            return None
+        return inhg * 33.8638866667
+
     def run(self, data_queue):
         """
         Run the simulation loop, continuously receiving data from X-Plane.
@@ -198,11 +300,55 @@ class Simulator:
                 heading = max(round(results.get(self.datarefs["heading"][0], 0)), 0)
                 tas = max(round(results.get(self.datarefs["true_airspeed"][0], 0)), 0)
                 course = max(round(results.get(self.datarefs["heading"][0], 0)), 0)
-                pitch = round(results.get(self.datarefs["pitch"][0], 0))
-                roll = 0
+                pitch = round(results.get(self.datarefs["pitch"][0], 0), 1)
+                roll = round(results.get(self.datarefs["roll"][0], 0), 1)
+                next_point = self._extract_next_point(results) or "DIRECT"
+                next_distance_nm = self._extract_next_distance_nm(results)
+                next_bearing_deg = self._extract_next_bearing_deg(results)
+                baro_hpa = self._extract_baro_hpa(results)
+
+                ap_engaged = bool((self._read_scalar(results, "ap_servos_on") or 0.0) > 0.5)
+                ap_gps_mode = bool(
+                    (self._read_scalar(results, "ap_nav_status") or 0.0) > 0.5
+                    or (self._read_scalar(results, "ap_gpss_status") or 0.0) > 0.5
+                    or (self._read_scalar(results, "ap_heading_is_gpss") or 0.0) > 0.5
+                )
+                ap_alt_mode = bool(
+                    (self._read_scalar(results, "ap_altitude_hold_status") or 0.0) > 0.5
+                    or (self._read_scalar(results, "ap_alts_armed") or 0.0) > 0.5
+                    or (self._read_scalar(results, "ap_alts_captured") or 0.0) > 0.5
+                )
+                ap_vs_mode = bool(
+                    (self._read_scalar(results, "ap_vvi_status") or 0.0) > 0.5
+                    or (self._read_scalar(results, "ap_alt_vvi_is_showing_vvi") or 0.0) > 0.5
+                )
+
+                if next_distance_nm is None:
+                    next_distance_nm = 0.0
+                if next_bearing_deg is None:
+                    next_bearing_deg = float(course)
+                if baro_hpa is None:
+                    baro_hpa = 1013.0
                 
                 # Send results to the queue
-                data = {"airspeed": airspeed, "altitude": altitude, "vertical_speed": vertical_speed, "heading": heading, "tas": tas, "course": course, "pitch": pitch, "roll": roll}
+                data = {
+                    "airspeed": airspeed,
+                    "altitude": altitude,
+                    "vertical_speed": vertical_speed,
+                    "heading": heading,
+                    "tas": tas,
+                    "course": course,
+                    "pitch": pitch,
+                    "roll": roll,
+                    "next_point": next_point,
+                    "next_distance_nm": float(next_distance_nm),
+                    "next_bearing_deg": float(next_bearing_deg),
+                    "baro_hpa": float(baro_hpa),
+                    "ap_ap": ap_engaged,
+                    "ap_gps": ap_gps_mode,
+                    "ap_alt": ap_alt_mode,
+                    "ap_vs": ap_vs_mode,
+                }
                 if data_queue.full():
                     try:
                         data_queue.get_nowait()
@@ -210,7 +356,7 @@ class Simulator:
                         pass
                 data_queue.put_nowait(data)
                 logger.debug(
-                    "X-Plane data airspeed=%s altitude=%s vertical_speed=%s heading=%s tas=%s course=%s pitch=%s roll=%s",
+                    "X-Plane data airspeed=%s altitude=%s vertical_speed=%s heading=%s tas=%s course=%s pitch=%s roll=%s next=%s dis=%.1f brg=%.1f baro=%.1f ap=%s gps=%s alt=%s vs=%s",
                     airspeed,
                     altitude,
                     vertical_speed,
@@ -219,6 +365,14 @@ class Simulator:
                     course,
                     pitch,
                     roll,
+                    next_point,
+                    next_distance_nm,
+                    next_bearing_deg,
+                    baro_hpa,
+                    ap_engaged,
+                    ap_gps_mode,
+                    ap_alt_mode,
+                    ap_vs_mode,
                 )
         except (OSError, TimeoutError) as e:
             if self._running.is_set():

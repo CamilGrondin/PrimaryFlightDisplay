@@ -24,6 +24,18 @@ except Exception:  # pragma: no cover - optional dependency on non-RPi hosts
 logger = logging.getLogger(__name__)
 
 
+def _is_raspberry_pi() -> bool:
+    """Return True only when running on Raspberry Pi hardware."""
+    try:
+        with open("/proc/device-tree/model", "r", encoding="utf-8") as model_file:
+            return "Raspberry Pi" in model_file.read()
+    except Exception:
+        return False
+
+
+RUNNING_ON_RASPBERRY_PI = _is_raspberry_pi()
+
+
 class Com1RotaryTuner:
     """Read a quadrature rotary encoder on Raspberry Pi GPIO to tune COM1."""
 
@@ -45,7 +57,7 @@ class Com1RotaryTuner:
         self.fine_step_mhz = fine_step_mhz
         self.coarse_step_mhz = coarse_step_mhz
         self._pending_steps = 0
-        self._active = GPIO is not None
+        self._active = GPIO is not None and RUNNING_ON_RASPBERRY_PI
         self._gpio = GPIO
         self._last_a = 1
         self._last_b = 1
@@ -208,7 +220,7 @@ class XPlaneGPIOSwitchPanel:
         }
         self.active_low = active_low
         self._debug = debug
-        self._active = GPIO is not None
+        self._active = GPIO is not None and RUNNING_ON_RASPBERRY_PI
         self._gpio = GPIO
         self._last_states: dict[str, int] = {}
 
@@ -272,6 +284,94 @@ class XPlaneGPIOSwitchPanel:
             gpio.cleanup(tuple(self.pin_map.values()))
 
 
+class SimulatedSwitchPanel:
+    """Software switch panel used when hardware GPIO is unavailable.
+
+    Number keys toggle switches:
+    1=battery, 2=beacon, 3=landing, 4=taxi, 5=nav, 6=strobe, 7=pitot.
+    """
+
+    def __init__(self, pin_map: dict[str, int] | None = None, debug: bool = False) -> None:
+        self.pin_map = pin_map or {
+            "battery_switch": 5,
+            "beacon_lights": 6,
+            "landing_lights": 13,
+            "taxi_lights": 19,
+            "nav_lights": 26,
+            "strobe_lights": 20,
+            "pitot_heat": 21,
+        }
+        self._debug = debug
+        self._active = True
+        self._states = {
+            "battery_switch": 1,
+            "beacon_lights": 0,
+            "landing_lights": 0,
+            "taxi_lights": 0,
+            "nav_lights": 0,
+            "strobe_lights": 0,
+            "pitot_heat": 0,
+        }
+        self._prev_pressed: dict[str, bool] = {name: False for name in self._states}
+
+        try:
+            import pygame
+
+            self._key_map = {
+                "battery_switch": pygame.K_1,
+                "beacon_lights": pygame.K_2,
+                "landing_lights": pygame.K_3,
+                "taxi_lights": pygame.K_4,
+                "nav_lights": pygame.K_5,
+                "strobe_lights": pygame.K_6,
+                "pitot_heat": pygame.K_7,
+            }
+        except Exception:
+            self._active = False
+            self._key_map = {}
+
+    @property
+    def available(self) -> bool:
+        return self._active
+
+    def read_states(self) -> dict[str, int]:
+        if not self._active:
+            return {}
+        return dict(self._states)
+
+    def read_raw_states(self) -> dict[str, int]:
+        # Simulated panel has no electrical/raw distinction.
+        return self.read_states()
+
+    def poll_changed(self) -> dict[str, int] | None:
+        if not self._active:
+            return None
+
+        import pygame
+
+        pygame.event.pump()
+        keys = pygame.key.get_pressed()
+
+        changed = False
+        for name, key_code in self._key_map.items():
+            pressed = bool(keys[key_code])
+            if pressed and not self._prev_pressed[name]:
+                self._states[name] = 0 if self._states[name] else 1
+                changed = True
+                logger.info("Sim switch %s -> %s", name, self._states[name])
+            self._prev_pressed[name] = pressed
+
+        if changed:
+            if self._debug:
+                pretty = ", ".join(f"{key}={value}" for key, value in sorted(self._states.items()))
+                logger.debug("Simulated switches -> %s", pretty)
+            return dict(self._states)
+        return None
+
+    def stop(self) -> None:
+        return None
+
+
 def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
     """Adjust COM1 frequency within valid aviation band range.
 
@@ -293,7 +393,7 @@ def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
 
 def _print_all_gpio_states(
     com1_tuner: Com1RotaryTuner | None,
-    xplane_switch_panel: XPlaneGPIOSwitchPanel | None,
+    xplane_switch_panel: XPlaneGPIOSwitchPanel | SimulatedSwitchPanel | None,
 ) -> None:
     chunks: list[str] = []
 
@@ -398,6 +498,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", help="Path to a JSON configuration file")
 
     parser.add_argument("--joystick-name", help="Joystick name hint for mode 1")
+    parser.add_argument(
+        "--control-device",
+        choices=["auto", "joystick", "keyboard"],
+        default="auto",
+        help="Mode 1 input device (auto, joystick, keyboard)",
+    )
     parser.add_argument("--xplane-ip", help="X-Plane IP address for mode 2")
     parser.add_argument("--xplane-port", type=int, help="X-Plane UDP port for mode 2")
     parser.add_argument("--msp-port", help="MSP serial port for mode 3")
@@ -471,8 +577,13 @@ def build_source(mode: int, args: argparse.Namespace):
     """
     if mode == MODE_JOYSTICK:
         joystick_name = args.joystick_name or prompt_text("Joystick name hint", Config.joystick.name_hint)
-        source = JoystickManualSource(joystick_name_hint=joystick_name)
-        logger.info("Mode 1 active: joystick manual control")
+        source = JoystickManualSource(
+            joystick_name_hint=joystick_name,
+            control_device=args.control_device,
+        )
+        logger.info("Mode 1 active: manual control via %s", source.input_mode)
+        if source.input_mode == "keyboard":
+            logger.info("Keyboard controls: A/D roll, W/S pitch, R/F throttle, HOME/END max/min throttle")
         return source
 
     if mode == MODE_XPLANE:
@@ -496,7 +607,7 @@ def run_pfd_loop(
     source,
     mode: int,
     com1_tuner: Com1RotaryTuner | None = None,
-    xplane_switch_panel: XPlaneGPIOSwitchPanel | None = None,
+    xplane_switch_panel: XPlaneGPIOSwitchPanel | SimulatedSwitchPanel | None = None,
     print_gpio_states: bool = True,
     gpio_print_interval_s: float = 0.5,
 ) -> None:
@@ -536,6 +647,10 @@ def run_pfd_loop(
         "ap_vs": False,
         "bug_heading": 0.0,
         "bug_bearing": 0.0,
+        "next_point": Config.commands.next_point,
+        "next_distance_nm": float(Config.commands.next_distance_nm),
+        "next_bearing_deg": float(Config.commands.next_bearing_deg),
+        "baro_hpa": float(Config.commands.baro_hpa),
     }
     last_gpio_print_t = 0.0
 
@@ -587,6 +702,10 @@ def run_pfd_loop(
             state["ap_vs"],
             state["bug_heading"],
             state["bug_bearing"],
+            state["next_point"],
+            state["next_distance_nm"],
+            state["next_bearing_deg"],
+            state["baro_hpa"],
         )
 
 
@@ -626,15 +745,16 @@ def main(argv: list[str] | None = None) -> None:
         "strobe_lights": switch_cfg.strobe_lights,
         "pitot_heat": switch_cfg.pitot_heat,
     }
-    xplane_switch_panel = (
-        XPlaneGPIOSwitchPanel(
-            pin_map=switch_pin_map,
-            active_low=switch_cfg.active_low,
-            debug=switch_cfg.debug,
-        )
-        if mode == MODE_XPLANE
-        else None
-    )
+    xplane_switch_panel: XPlaneGPIOSwitchPanel | SimulatedSwitchPanel | None = None
+    if mode == MODE_XPLANE:
+        if RUNNING_ON_RASPBERRY_PI and GPIO is not None:
+            xplane_switch_panel = XPlaneGPIOSwitchPanel(
+                pin_map=switch_pin_map,
+                active_low=switch_cfg.active_low,
+                debug=switch_cfg.debug,
+            )
+        else:
+            xplane_switch_panel = SimulatedSwitchPanel(pin_map=switch_pin_map, debug=switch_cfg.debug)
 
     if com1_tuner.available:
         logger.info(
@@ -645,10 +765,12 @@ def main(argv: list[str] | None = None) -> None:
             com1_tuner.pin_aux,
         )
     else:
-        logger.info("RPi.GPIO not available: COM1 rotary tuning disabled")
+        logger.info("COM1 rotary tuning disabled (non-Raspberry Pi host or RPi.GPIO unavailable)")
 
     if xplane_switch_panel is not None:
-        if xplane_switch_panel.available:
+        if isinstance(xplane_switch_panel, SimulatedSwitchPanel):
+            logger.info("Simulated mode 2 switches active (keys 1..7 toggle battery/beacon/landing/taxi/nav/strobe/pitot)")
+        elif xplane_switch_panel.available:
             logger.info("Mode 2 GPIO switches active: battery/beacon/landing/taxi/nav/strobe/pitot")
             if isinstance(data_source, XPlaneRealtimeSource):
                 data_source.update_switch_states(xplane_switch_panel.read_states())

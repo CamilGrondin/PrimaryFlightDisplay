@@ -101,6 +101,10 @@ class CommandDefaults:
     heading_offset_deg: float = 8.0      # Bug heading offset
     bearing_offset_deg: float = 95.0     # Bug bearing offset
     ap_vs_threshold: float = 300.0       # Vertical speed threshold for AP
+    next_point: str = "DIRECT"
+    next_distance_nm: float = 0.0
+    next_bearing_deg: float = 0.0
+    baro_hpa: int = 1013
 
 
 @dataclass

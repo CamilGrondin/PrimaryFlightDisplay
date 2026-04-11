@@ -235,7 +235,7 @@ class AltitudeIndicatorLittle:
             width=self.line_width3,
         )
 
-    def update(self, altitude: float, command: float = None):
+    def update(self, altitude: float, command: float = None, baro_hpa: float | None = None):
         # self.altitude = np.clip(altitude, 0.0, None)
         self.altitude = altitude
 
