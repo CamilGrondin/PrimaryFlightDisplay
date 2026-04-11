@@ -1,6 +1,11 @@
-from display import DisplayPFD
+import argparse
+import json
+import logging
 import threading
 import time
+
+from config import Config
+from display import DisplayPFD
 from modes import (
     JoystickManualSource,
     MODE_JOYSTICK,
@@ -16,17 +21,29 @@ except Exception:  # pragma: no cover - optional dependency on non-RPi hosts
     GPIO = None
 
 
+logger = logging.getLogger(__name__)
+
+
 class Com1RotaryTuner:
     """Read a quadrature rotary encoder on Raspberry Pi GPIO to tune COM1."""
 
-    def __init__(self, pin_a: int = 17, pin_b: int = 27, pin_sw: int = 22, pin_aux: int = 4) -> None:
+    def __init__(
+        self,
+        pin_a: int = 17,
+        pin_b: int = 27,
+        pin_sw: int = 22,
+        pin_aux: int = 4,
+        fine_step_mhz: float = 0.025,
+        coarse_step_mhz: float = 1.0,
+        debug: bool = False,
+    ) -> None:
         self.pin_a = pin_a
         self.pin_b = pin_b
         self.pin_sw = pin_sw
         self.pin_aux = pin_aux
 
-        self.fine_step_mhz = 0.001
-        self.coarse_step_mhz = 0.001
+        self.fine_step_mhz = fine_step_mhz
+        self.coarse_step_mhz = coarse_step_mhz
         self._pending_steps = 0
         self._active = GPIO is not None
         self._gpio = GPIO
@@ -34,7 +51,7 @@ class Com1RotaryTuner:
         self._last_b = 1
         self._last_snapshot = (1, 1, 1, 1)
         self._last_diag_t = 0.0
-        self._debug = True
+        self._debug = debug
         self._lock = threading.Lock()
 
         if not self._active:
@@ -60,7 +77,7 @@ class Com1RotaryTuner:
 
         if self._debug:
             a, b, sw, aux = self._last_snapshot
-            print(f"GPIO init A={a} B={b} SW={sw} AUX={aux}")
+            logger.debug("GPIO init A=%s B=%s SW=%s AUX=%s", a, b, sw, aux)
 
     @property
     def available(self) -> bool:
@@ -92,7 +109,18 @@ class Com1RotaryTuner:
             int(gpio.input(self.pin_aux)),
         )
 
+    @staticmethod
+    def _is_coarse_selected(sw: int, aux: int) -> bool:
+        # Inputs use pull-up resistors: 0 means pressed.
+        return sw == 0 or aux == 0
+
     def _step_mhz(self) -> float:
+        if not self._active:
+            return self.fine_step_mhz
+
+        _, _, sw, aux = self._read_snapshot()
+        if self._is_coarse_selected(sw, aux):
+            return self.coarse_step_mhz
         return self.fine_step_mhz
 
     def _on_edge(self, _channel: int) -> None:
@@ -127,13 +155,21 @@ class Com1RotaryTuner:
             snapshot = self._read_snapshot()
             if snapshot != self._last_snapshot:
                 a, b, sw, aux = snapshot
-                print(f"GPIO A={a} B={b} SW={sw} AUX={aux}")
+                logger.debug("GPIO A=%s B=%s SW=%s AUX=%s", a, b, sw, aux)
                 self._last_snapshot = snapshot
             now = time.monotonic()
             if now - self._last_diag_t >= 3.0:
                 self._last_diag_t = now
                 a, b, sw, aux = self._last_snapshot
-                print(f"GPIO idle A={a} B={b} SW={sw} AUX={aux} steps={self._pending_steps}")
+                logger.debug(
+                    "GPIO idle A=%s B=%s SW=%s AUX=%s steps=%s step_mhz=%.3f",
+                    a,
+                    b,
+                    sw,
+                    aux,
+                    self._pending_steps,
+                    self._step_mhz(),
+                )
 
         with self._lock:
             steps = self._pending_steps
@@ -159,7 +195,7 @@ class XPlaneGPIOSwitchPanel:
         self,
         pin_map: dict[str, int] | None = None,
         active_low: bool = True,
-        debug: bool = True,
+        debug: bool = False,
     ) -> None:
         self.pin_map = pin_map or {
             "battery_switch": 5,
@@ -193,7 +229,7 @@ class XPlaneGPIOSwitchPanel:
         self._last_states = self.read_states()
         if self._debug:
             details = ", ".join(f"{name}=GPIO{pin}" for name, pin in self.pin_map.items())
-            print("GPIO switch panel init: " + details)
+            logger.debug("GPIO switch panel init: %s", details)
 
     @property
     def available(self) -> bool:
@@ -226,7 +262,7 @@ class XPlaneGPIOSwitchPanel:
             self._last_states = current
             if self._debug:
                 pretty = ", ".join(f"{key}={value}" for key, value in sorted(current.items()))
-                print("GPIO switches -> " + pretty)
+                logger.debug("GPIO switches -> %s", pretty)
             return current
         return None
 
@@ -247,8 +283,8 @@ def _adjust_com_frequency(current: float, steps: int, step_mhz: float) -> float:
     Returns:
         Adjusted frequency, clamped to [118.000, 136.975] MHz range.
     """
-    com_min = 118.000
-    com_max = 136.975
+    com_min = Config.frequencies.com_min
+    com_max = Config.frequencies.com_max
 
     tuned = current + steps * step_mhz
     tuned = max(com_min, min(com_max, tuned))
@@ -284,7 +320,7 @@ def _print_all_gpio_states(
             chunks.append("SWITCH " + ", ".join(switch_chunks))
 
     if chunks:
-        print("GPIO states -> " + " | ".join(chunks))
+        logger.debug("GPIO states -> %s", " | ".join(chunks))
 
 
 def prompt_text(label: str, default: str | None = None) -> str:
@@ -327,12 +363,20 @@ def prompt_int(label: str, default: int | None = None) -> int:
             print("Please enter a valid integer.")
 
 
-def choose_mode() -> int:
+def choose_mode(selected_mode: int | None = None) -> int:
     """Present mode selection menu and return user's choice.
+
+    Args:
+        selected_mode: Optional pre-selected mode from CLI.
 
     Returns:
         MODE_JOYSTICK (1), MODE_XPLANE (2), or MODE_MSP (3).
     """
+    if selected_mode is not None:
+        if selected_mode in (MODE_JOYSTICK, MODE_XPLANE, MODE_MSP):
+            return selected_mode
+        raise ValueError("Mode must be 1, 2, or 3.")
+
     print("Primary Flight Display")
     print("1 - Manual control via joystick Saitek X52")
     print("2 - Real-time data from X-Plane (UDP)")
@@ -344,34 +388,106 @@ def choose_mode() -> int:
         print("Mode must be 1, 2, or 3.")
 
 
-def build_source(mode: int):
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments.
+
+    Interactive prompts are used as fallback when an argument is omitted.
+    """
+    parser = argparse.ArgumentParser(description="Primary Flight Display")
+    parser.add_argument("--mode", type=int, choices=[MODE_JOYSTICK, MODE_XPLANE, MODE_MSP])
+    parser.add_argument("--config", help="Path to a JSON configuration file")
+
+    parser.add_argument("--joystick-name", help="Joystick name hint for mode 1")
+    parser.add_argument("--xplane-ip", help="X-Plane IP address for mode 2")
+    parser.add_argument("--xplane-port", type=int, help="X-Plane UDP port for mode 2")
+    parser.add_argument("--msp-port", help="MSP serial port for mode 3")
+    parser.add_argument("--msp-baud", type=int, help="MSP baud rate for mode 3")
+
+    parser.add_argument("--screen-width", type=int, help="Override screen width")
+    parser.add_argument("--screen-height", type=int, help="Override screen height")
+    parser.add_argument("--max-fps", type=int, help="Override display max FPS")
+    parser.add_argument("--little", action="store_true", help="Use little instrument scale")
+
+    parser.add_argument("--no-gpio-print", action="store_true", help="Disable periodic GPIO state logging")
+    parser.add_argument("--gpio-print-interval", type=float, help="GPIO print interval in seconds")
+    parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    return parser.parse_args(argv)
+
+
+def _load_config_file(config_path: str | None) -> None:
+    if config_path is None:
+        return
+    with open(config_path, "r", encoding="utf-8") as handle:
+        loaded = json.load(handle)
+    if not isinstance(loaded, dict):
+        raise ValueError("Configuration file must contain a JSON object")
+    Config.from_dict(loaded)
+
+
+def _apply_config_overrides(args: argparse.Namespace) -> None:
+    if args.screen_width is not None:
+        Config.screen.width = args.screen_width
+    if args.screen_height is not None:
+        Config.screen.height = args.screen_height
+    if args.max_fps is not None:
+        Config.screen.max_fps = args.max_fps
+    if args.little:
+        Config.screen.little = True
+
+    if args.xplane_ip is not None:
+        Config.xplane.ip = args.xplane_ip
+    if args.xplane_port is not None:
+        Config.xplane.port = args.xplane_port
+    if args.msp_port is not None:
+        Config.msp.port = args.msp_port
+    if args.msp_baud is not None:
+        Config.msp.baudrate = args.msp_baud
+
+    if args.gpio_print_interval is not None:
+        Config.runtime.gpio_print_interval_s = args.gpio_print_interval
+    if args.no_gpio_print:
+        Config.runtime.print_gpio_states = False
+
+
+def configure_logging(verbose: bool = False) -> None:
+    """Configure application-wide logging."""
+    configured_level = str(getattr(Config.runtime, "log_level", "INFO")).upper()
+    level = logging.DEBUG if verbose else getattr(logging, configured_level, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+
+
+def build_source(mode: int, args: argparse.Namespace):
     """Create and configure telemetry source based on selected mode.
 
     Args:
         mode: Operating mode (1=Joystick, 2=X-Plane, 3=MSP).
+        args: Parsed CLI arguments.
 
     Returns:
         Initialized telemetry source (JoystickManualSource, XPlaneRealtimeSource, or MSPRealtimeSource).
     """
     if mode == MODE_JOYSTICK:
-        joystick_name = prompt_text("Joystick name hint", "X52")
+        joystick_name = args.joystick_name or prompt_text("Joystick name hint", Config.joystick.name_hint)
         source = JoystickManualSource(joystick_name_hint=joystick_name)
-        print("Mode 1 active: joystick manual control")
+        logger.info("Mode 1 active: joystick manual control")
         return source
 
     if mode == MODE_XPLANE:
-        xplane_ip = prompt_text("X-Plane IP address", "127.0.0.1")
-        xplane_port = prompt_int("X-Plane UDP port", 49000)
+        xplane_ip = args.xplane_ip or prompt_text("X-Plane IP address", Config.xplane.ip)
+        xplane_port = args.xplane_port if args.xplane_port is not None else prompt_int("X-Plane UDP port", Config.xplane.port)
         source = XPlaneRealtimeSource(ip=xplane_ip, port=xplane_port)
         source.start()
-        print("Mode 2 active: X-Plane UDP real-time")
+        logger.info("Mode 2 active: X-Plane UDP real-time")
         return source
 
-    msp_port = prompt_text("MSP serial port", "/dev/tty.usbserial")
-    msp_baud = prompt_int("MSP baud rate", 115200)
-    source = MSPRealtimeSource(port=msp_port, baudrate=msp_baud)
+    msp_port = args.msp_port or prompt_text("MSP serial port", Config.msp.port)
+    msp_baud = args.msp_baud if args.msp_baud is not None else prompt_int("MSP baud rate", Config.msp.baudrate)
+    source = MSPRealtimeSource(port=msp_port, baudrate=msp_baud, timeout=Config.msp.timeout)
     source.start()
-    print("Mode 3 active: MSP IMU real-time")
+    logger.info("Mode 3 active: MSP IMU real-time")
     return source
 
 
@@ -410,10 +526,10 @@ def run_pfd_loop(
         "course": 0.0,
         "pitch": 0.0,
         "roll": 0.0,
-        "nav1_freq": 111.70,
-        "nav2_freq": 111.70,
-        "com1_freq": 121.800,
-        "com2_freq": 121.800,
+        "nav1_freq": Config.frequencies.nav1,
+        "nav2_freq": Config.frequencies.nav2,
+        "com1_freq": Config.frequencies.com1,
+        "com2_freq": Config.frequencies.com2,
         "ap_gps": True,
         "ap_ap": True,
         "ap_alt": True,
@@ -440,7 +556,7 @@ def run_pfd_loop(
             steps, step_mhz = com1_tuner.poll()
             if steps != 0:
                 state["com1_freq"] = _adjust_com_frequency(state["com1_freq"], steps, step_mhz)
-                print(f"COM1 -> {state['com1_freq']:.3f}")
+                logger.info("COM1 -> %.3f", state["com1_freq"])
 
         if mode == MODE_XPLANE and xplane_switch_panel is not None and hasattr(source, "update_switch_states"):
             switch_states = xplane_switch_panel.poll_changed()
@@ -474,40 +590,88 @@ def run_pfd_loop(
         )
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Main entry point: initialize configuration, select mode, and run display loop."""
-    mode = choose_mode()
-    pfd = DisplayPFD()
-    data_source = build_source(mode)
-    com1_tuner = Com1RotaryTuner(pin_a=4, pin_b=17, pin_sw=27, pin_aux=22)
-    xplane_switch_panel = XPlaneGPIOSwitchPanel() if mode == MODE_XPLANE else None
+    args = parse_args(argv)
+    _load_config_file(args.config)
+    _apply_config_overrides(args)
+    configure_logging(verbose=args.verbose)
+
+    mode = choose_mode(args.mode)
+    pfd = DisplayPFD(
+        screen_config=Config.screen,
+        frequency_defaults=Config.frequencies,
+        command_defaults=Config.commands,
+    )
+    data_source = build_source(mode, args)
+
+    rotary_gpio = Config.rotary.gpio
+    com1_tuner = Com1RotaryTuner(
+        pin_a=rotary_gpio.pin_a,
+        pin_b=rotary_gpio.pin_b,
+        pin_sw=rotary_gpio.pin_sw,
+        pin_aux=rotary_gpio.pin_aux,
+        fine_step_mhz=Config.rotary.fine_step_mhz,
+        coarse_step_mhz=Config.rotary.coarse_step_mhz,
+        debug=Config.rotary.debug,
+    )
+
+    switch_cfg = Config.xplane_switch_panel
+    switch_pin_map = {
+        "battery_switch": switch_cfg.battery_switch,
+        "beacon_lights": switch_cfg.beacon_lights,
+        "landing_lights": switch_cfg.landing_lights,
+        "taxi_lights": switch_cfg.taxi_lights,
+        "nav_lights": switch_cfg.nav_lights,
+        "strobe_lights": switch_cfg.strobe_lights,
+        "pitot_heat": switch_cfg.pitot_heat,
+    }
+    xplane_switch_panel = (
+        XPlaneGPIOSwitchPanel(
+            pin_map=switch_pin_map,
+            active_low=switch_cfg.active_low,
+            debug=switch_cfg.debug,
+        )
+        if mode == MODE_XPLANE
+        else None
+    )
 
     if com1_tuner.available:
-        print("COM1 rotary tuning active on GPIO BCM A=4 B=17 SW=27 AUX=22")
+        logger.info(
+            "COM1 rotary tuning active on GPIO BCM A=%s B=%s SW=%s AUX=%s",
+            com1_tuner.pin_a,
+            com1_tuner.pin_b,
+            com1_tuner.pin_sw,
+            com1_tuner.pin_aux,
+        )
     else:
-        print("RPi.GPIO not available: COM1 rotary tuning disabled")
+        logger.info("RPi.GPIO not available: COM1 rotary tuning disabled")
 
     if xplane_switch_panel is not None:
         if xplane_switch_panel.available:
-            print("Mode 2 GPIO switches active: battery/beacon/landing/taxi/nav/strobe/pitot")
+            logger.info("Mode 2 GPIO switches active: battery/beacon/landing/taxi/nav/strobe/pitot")
             if isinstance(data_source, XPlaneRealtimeSource):
                 data_source.update_switch_states(xplane_switch_panel.read_states())
         else:
-            print("RPi.GPIO not available: mode 2 GPIO switches disabled")
+            logger.info("RPi.GPIO not available: mode 2 GPIO switches disabled")
+
+    print_gpio_states = Config.runtime.print_gpio_states
+    gpio_print_interval_s = Config.runtime.gpio_print_interval_s
 
     try:
-        print("GPIO state print loop active (interval 0.5s)")
+        if print_gpio_states:
+            logger.info("GPIO state print loop active (interval %.2fs)", gpio_print_interval_s)
         run_pfd_loop(
             pfd,
             data_source,
             mode,
             com1_tuner=com1_tuner,
             xplane_switch_panel=xplane_switch_panel,
-            print_gpio_states=True,
-            gpio_print_interval_s=0.5,
+            print_gpio_states=print_gpio_states,
+            gpio_print_interval_s=gpio_print_interval_s,
         )
     except KeyboardInterrupt:
-        print("\nProgram interrupted by user")
+        logger.info("Program interrupted by user")
     finally:
         if hasattr(data_source, "stop"):
             data_source.stop()

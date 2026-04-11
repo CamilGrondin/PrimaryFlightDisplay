@@ -8,7 +8,9 @@ telemetry data structures, and configuration management.
 # -*- coding: utf-8 -*-
 
 import unittest
+from unittest.mock import patch
 from dataclasses import asdict
+import time
 
 from config import (
     CommandDefaults,
@@ -20,8 +22,8 @@ from config import (
     XPlaneConfig,
     MSPConfig,
 )
-from main import _adjust_com_frequency, prompt_text, prompt_int, choose_mode
-from modes import Telemetry, _normalize_heading
+from main import Com1RotaryTuner, _adjust_com_frequency, parse_args, prompt_text, prompt_int, choose_mode
+from modes import MSPRealtimeSource, Telemetry, XPlaneRealtimeSource, _normalize_heading
 
 
 class TestCOMFrequencyAdjustment(unittest.TestCase):
@@ -181,7 +183,10 @@ class TestConfiguration(unittest.TestCase):
         self.assertIn("frequencies", config_dict)
         self.assertIn("joystick", config_dict)
         self.assertIn("xplane", config_dict)
+        self.assertIn("xplane_switch_panel", config_dict)
         self.assertIn("msp", config_dict)
+        self.assertIn("rotary", config_dict)
+        self.assertIn("runtime", config_dict)
 
     def test_config_from_dict_basic(self):
         """Test configuration import from dictionary."""
@@ -212,6 +217,28 @@ class TestConfiguration(unittest.TestCase):
         msp = Config.msp
         self.assertEqual(msp.baudrate, 115200)
         self.assertGreater(msp.timeout, 0)
+
+    def test_rotary_nested_gpio_from_dict(self):
+        """Test nested GPIO config loading for rotary settings."""
+        original_rotary = Config.rotary
+        try:
+            Config.from_dict(
+                {
+                    "rotary": {
+                        "fine_step_mhz": 0.05,
+                        "coarse_step_mhz": 0.5,
+                        "gpio": {"pin_a": 10, "pin_b": 11, "pin_sw": 12, "pin_aux": 13},
+                    }
+                }
+            )
+            self.assertAlmostEqual(Config.rotary.fine_step_mhz, 0.05, places=3)
+            self.assertAlmostEqual(Config.rotary.coarse_step_mhz, 0.5, places=3)
+            self.assertEqual(Config.rotary.gpio.pin_a, 10)
+            self.assertEqual(Config.rotary.gpio.pin_b, 11)
+            self.assertEqual(Config.rotary.gpio.pin_sw, 12)
+            self.assertEqual(Config.rotary.gpio.pin_aux, 13)
+        finally:
+            Config.rotary = original_rotary
 
 
 class TestScreenConfiguration(unittest.TestCase):
@@ -273,15 +300,97 @@ class TestPromptFunctions(unittest.TestCase):
 
     def test_prompt_text_type(self):
         """Test prompt_text returns string."""
-        # Note: This test doesn't actually prompt since we can't intercept input
-        # In a real scenario, mock input() or test with StringIO
-        pass
+        with patch("builtins.input", return_value="abc"):
+            self.assertEqual(prompt_text("Label"), "abc")
+
+    def test_prompt_text_uses_default(self):
+        """Test prompt_text returns default when input is empty."""
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(prompt_text("Label", "fallback"), "fallback")
 
     def test_prompt_int_type(self):
         """Test prompt_int returns integer."""
-        # Note: This test doesn't actually prompt since we can't intercept input
-        # In a real scenario, mock input() or test with StringIO
-        pass
+        with patch("builtins.input", side_effect=["bad", "42"]):
+            with patch("builtins.print"):
+                self.assertEqual(prompt_int("Number"), 42)
+
+    def test_choose_mode_preselected(self):
+        """Test choose_mode accepts a valid preselected mode."""
+        self.assertEqual(choose_mode(2), 2)
+
+    def test_choose_mode_invalid_preselected(self):
+        """Test choose_mode rejects invalid preselected mode."""
+        with self.assertRaises(ValueError):
+            choose_mode(99)
+
+
+class TestCliParsing(unittest.TestCase):
+    """Test command-line argument parsing."""
+
+    def test_parse_args_mode2_with_udp_options(self):
+        args = parse_args(["--mode", "2", "--xplane-ip", "10.0.0.8", "--xplane-port", "49001"])
+        self.assertEqual(args.mode, 2)
+        self.assertEqual(args.xplane_ip, "10.0.0.8")
+        self.assertEqual(args.xplane_port, 49001)
+
+    def test_parse_args_gpio_flags(self):
+        args = parse_args(["--no-gpio-print", "--gpio-print-interval", "0.25"])
+        self.assertTrue(args.no_gpio_print)
+        self.assertAlmostEqual(args.gpio_print_interval, 0.25, places=2)
+
+
+class TestCom1RotarySelection(unittest.TestCase):
+    """Test rotary encoder step mode selection."""
+
+    def test_coarse_selected_when_switch_pressed(self):
+        self.assertTrue(Com1RotaryTuner._is_coarse_selected(sw=0, aux=1))
+
+    def test_coarse_selected_when_aux_pressed(self):
+        self.assertTrue(Com1RotaryTuner._is_coarse_selected(sw=1, aux=0))
+
+    def test_fine_selected_when_no_button_pressed(self):
+        self.assertFalse(Com1RotaryTuner._is_coarse_selected(sw=1, aux=1))
+
+
+class _FakeSimulator:
+    """Simple fake simulator for source lifecycle tests."""
+
+    last_instance = None
+
+    def __init__(self, ip, port):
+        self.ip = ip
+        self.port = port
+        self.stop_called = False
+        _FakeSimulator.last_instance = self
+
+    def set_switch_states(self, _states):
+        return None
+
+    def run(self, _data_queue):
+        while not self.stop_called:
+            time.sleep(0.01)
+
+    def stop(self):
+        self.stop_called = True
+
+
+class TestSourceLifecycle(unittest.TestCase):
+    """Test start/stop lifecycle for realtime sources."""
+
+    def test_xplane_source_start_stop(self):
+        with patch("modes.Simulator", _FakeSimulator):
+            source = XPlaneRealtimeSource(ip="127.0.0.1", port=49000)
+            source.start()
+            time.sleep(0.05)
+            source.stop()
+            self.assertIsNone(source.thread)
+            self.assertIsNotNone(_FakeSimulator.last_instance)
+            self.assertTrue(_FakeSimulator.last_instance.stop_called)
+
+    def test_msp_stop_without_start(self):
+        source = MSPRealtimeSource(port="/dev/null", baudrate=115200)
+        source.stop()
+        self.assertIsNone(source.thread)
 
 
 class TestModeConstants(unittest.TestCase):

@@ -27,29 +27,29 @@ A Primary Flight Display (PFD) interface created with Pygame for real-time visua
 
 3. Install the required packages:
     ```bash
-    pip install numpy pygame
+    python3 -m pip install -r requirements.txt
     ```
 
     On Raspberry Pi, for COM1 tuning with a GPIO rotary encoder, also install:
     ```bash
-    pip install RPi.GPIO
+    python3 -m pip install RPi.GPIO
     ```
 
     For MSP mode (mode 3), also install:
     ```bash
-    pip install pyserial
+    python3 -m pip install pyserial
     ```
 
 4. Run an example:
     ```bash
-    python example.py
+    python3 example.py
     ```
 
 ## Usage
 
 ### Mode Selector
 
-The application now supports three runtime modes:
+The application supports three runtime modes, selectable by CLI argument or interactive prompt fallback:
 
 - Mode 1: Manual control with joystick (Saitek X52 preferred)
 - Mode 2: Real-time X-Plane data through UDP
@@ -70,13 +70,19 @@ Examples:
 
 ```bash
 # Mode 1: Joystick
-python main.py --mode 1 --joystick-name X52
+python3 main.py --mode 1 --joystick-name X52
 
 # Mode 2: X-Plane UDP
-python main.py --mode 2 --xplane-ip 127.0.0.1 --xplane-port 49000
+python3 main.py --mode 2 --xplane-ip 127.0.0.1 --xplane-port 49000
 
 # Mode 3: MSP serial
-python main.py --mode 3 --msp-port /dev/tty.usbserial --msp-baud 115200
+python3 main.py --mode 3 --msp-port /dev/tty.usbserial --msp-baud 115200
+
+# Debug logging
+python3 main.py --mode 2 --verbose
+
+# Disable periodic GPIO diagnostics
+python3 main.py --mode 2 --no-gpio-print
 ```
 
 Below is an example demonstrating how to use the PFD interface with `AircraftState` and `PrimaryFlightDisplay`:

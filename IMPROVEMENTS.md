@@ -93,11 +93,11 @@ Les docstrings enrichissent :
 ## 3. Suite de Tests (`test_pfd.py`)
 
 ### 📝 Description
-34 tests unitaires couvrant les fonctions critiques.
+45 tests unitaires couvrant les fonctions critiques.
 
 ### ✅ Résultats
 ```
-Ran 34 tests in 0.001s
+Ran 45 tests in 0.059s
 OK
 ```
 
@@ -133,13 +133,13 @@ OK
 ### 🚀 Lancer les tests
 ```bash
 # Depuis le répertoire du projet
-python -m unittest test_pfd -v
+python3 -m unittest test_pfd -v
 
 # Un test spécifique
-python -m unittest test_pfd.TestCOMFrequencyAdjustment.test_adjust_frequency_up -v
+python3 -m unittest test_pfd.TestCOMFrequencyAdjustment.test_adjust_frequency_up -v
 
 # Avec verbose détaillé
-python -m unittest test_pfd -v 2>&1 | grep -E "^test_|OK|FAILED"
+python3 -m unittest test_pfd -v 2>&1 | grep -E "^test_|OK|FAILED"
 ```
 
 ### 📊 Structure des tests
@@ -152,7 +152,10 @@ test_pfd.py
 ├── TestScreenConfiguration         (2 tests)
 ├── TestCommandDefaults             (2 tests)
 ├── TestRadioFrequencies            (2 tests)
-├── TestPromptFunctions             (2 tests)
+├── TestPromptFunctions             (5 tests)
+├── TestCliParsing                  (2 tests)
+├── TestCom1RotarySelection         (3 tests)
+├── TestSourceLifecycle             (2 tests)
 ├── TestModeConstants               (1 test)
 └── TestDataclassIntegration        (2 tests)
 ```
@@ -163,17 +166,7 @@ test_pfd.py
 
 ### ✨ Prochaines étapes (optionnelles)
 
-1. **Utiliser Config dans main.py**
-   ```python
-   from config import Config
-   
-   def main():
-       screen_cfg = Config.screen
-       pfd = DisplayPFD(screen_cfg.width, screen_cfg.height)
-       com1_tuner = Com1RotaryTuner(**asdict(Config.rotary.gpio))
-   ```
-
-2. **Fichier JSON de configuration personnalisée**
+1. **Fichier JSON de configuration personnalisée**
    ```json
    {
      "screen": {"width": 1920, "height": 1080, "max_fps": 120},
@@ -181,16 +174,11 @@ test_pfd.py
    }
    ```
 
-3. **Tests CI/CD**
-   - Ajouter à GitHub Actions : `python -m unittest discover`
+2. **Extension des tests d'intégration hardware**
+    - Ajouter des tests GPIO/serial sur Raspberry Pi réel.
 
-4. **Logging avec config**
-   ```python
-   import logging
-   # Créer logger au lieu de print()
-   logger = logging.getLogger(__name__)
-   logger.info(f"COM1 -> {state['com1_freq']:.3f}")
-   ```
+3. **Validation statique dans CI**
+    - Ajouter `mypy` et `ruff` dans le workflow.
 
 ---
 
@@ -199,7 +187,7 @@ test_pfd.py
 | Fichier | Type | Changement |
 |---------|------|-----------|
 | `config.py` | ✨ Créé | Gestion centralisée configuration |
-| `test_pfd.py` | ✨ Créé | 34 tests unitaires |
+| `test_pfd.py` | ✨ Créé | 45 tests unitaires |
 | `main.py` | 📝 Modifié | Docstrings ajoutées |
 | `display.py` | 📝 Modifié | Docstrings + type hints |
 | `modes.py` | 📝 Modifié | Docstrings détaillées |
@@ -222,8 +210,9 @@ test_pfd.py
 - [x] Configuration centralisée
 - [x] Documentation complète
 - [x] Suite de tests
-- [ ] Fichier config JSON/YAML externalité (voir remarque Prochaines étapes #2)
-- [ ] Logging systematique (remplacer print())
+- [x] Logging systematique (remplacer print())
+- [x] Tests CI/CD (GitHub Actions)
+- [ ] Fichier config JSON/YAML externalité (voir remarque Prochaines étapes #1)
 - [ ] Tests d'intégration pour modes de telemetry
 - [ ] Benchmarking performance
 - [ ] Type checking avec mypy

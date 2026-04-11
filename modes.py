@@ -3,12 +3,17 @@ import queue
 import struct
 import threading
 import time
+import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
 
 import pygame
 
+from config import Config
 from simulator import Simulator
+
+
+logger = logging.getLogger(__name__)
 
 try:
     import serial  # type: ignore
@@ -91,15 +96,19 @@ class JoystickManualSource:
     including bank-to-turn calculation and speed ramping.
     """
 
-    def __init__(self, joystick_name_hint: str = "X52") -> None:
+    def __init__(self, joystick_name_hint: str | None = None) -> None:
         """Initialize joystick input handler.
 
         Args:
-            joystick_name_hint: Substring to match joystick name (default: 'X52').
+            joystick_name_hint: Substring to match joystick name (default from config).
 
         Raises:
             RuntimeError: If no joystick is detected or initialization fails.
         """
+        joystick_cfg = Config.joystick
+        command_cfg = Config.commands
+        name_hint = joystick_name_hint or joystick_cfg.name_hint
+
         pygame.joystick.init()
         count = pygame.joystick.get_count()
         if count <= 0:
@@ -109,7 +118,7 @@ class JoystickManualSource:
         for idx in range(count):
             candidate = pygame.joystick.Joystick(idx)
             candidate.init()
-            if joystick_name_hint.lower() in candidate.get_name().lower():
+            if name_hint.lower() in candidate.get_name().lower():
                 selected = candidate
                 break
             if selected is None:
@@ -119,14 +128,26 @@ class JoystickManualSource:
             raise RuntimeError("Unable to initialize joystick.")
 
         self.joystick = selected
-        self.telemetry = Telemetry(airspeed=120.0, altitude=1500.0, heading=0.0, tas=120.0)
+        self.telemetry = Telemetry(
+            airspeed=joystick_cfg.default_airspeed,
+            altitude=joystick_cfg.default_altitude,
+            heading=0.0,
+            tas=joystick_cfg.default_airspeed,
+            nav1_freq=Config.frequencies.nav1,
+            nav2_freq=Config.frequencies.nav2,
+            com1_freq=Config.frequencies.com1,
+            com2_freq=Config.frequencies.com2,
+        )
         self.last_t = time.monotonic()
-        self.bank_deadzone_deg = 1.5
-        self.max_turn_rate_deg_s = 12.0
-        self.speed_tau = 1.4
-        self.max_accel_kts_s = 18.0
+        self.bank_deadzone_deg = joystick_cfg.bank_deadzone_deg
+        self.max_turn_rate_deg_s = joystick_cfg.max_turn_rate_deg_s
+        self.speed_tau = joystick_cfg.speed_tau
+        self.max_accel_kts_s = joystick_cfg.max_accel_kts_s
+        self.ap_vs_threshold = command_cfg.ap_vs_threshold
+        self.heading_offset_deg = command_cfg.heading_offset_deg
+        self.bearing_offset_deg = command_cfg.bearing_offset_deg
 
-        print("Manual mode joystick: " + self.joystick.get_name())
+        logger.info("Manual mode joystick: %s", self.joystick.get_name())
 
     def _axis(self, index: int, default: float = 0.0) -> float:
         """Read joystick axis value with bounds checking.
@@ -188,9 +209,9 @@ class JoystickManualSource:
         self.telemetry.vertical_speed = speed_fts * math.sin(math.radians(self.telemetry.pitch)) * 60.0
         self.telemetry.altitude = max(0.0, self.telemetry.altitude + (self.telemetry.vertical_speed / 60.0) * dt)
 
-        self.telemetry.ap_vs = abs(self.telemetry.vertical_speed) > 300.0
-        self.telemetry.bug_heading = _normalize_heading(self.telemetry.heading + 8.0)
-        self.telemetry.bug_bearing = _normalize_heading(self.telemetry.course + 95.0)
+        self.telemetry.ap_vs = abs(self.telemetry.vertical_speed) > self.ap_vs_threshold
+        self.telemetry.bug_heading = _normalize_heading(self.telemetry.heading + self.heading_offset_deg)
+        self.telemetry.bug_bearing = _normalize_heading(self.telemetry.course + self.bearing_offset_deg)
 
         return self.telemetry.as_dict()
 
@@ -221,14 +242,16 @@ class XPlaneRealtimeSource:
         self.error_queue: "queue.Queue[Exception]" = queue.Queue(maxsize=1)
         self.thread: Optional[threading.Thread] = None
         self.simulator: Optional[Simulator] = None
+        self._stop_event = threading.Event()
 
     def start(self) -> None:
         """Start background thread to receive X-Plane UDP data."""
-        if self.thread is not None:
+        if self.thread is not None and self.thread.is_alive():
             return
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._worker, daemon=True)
         self.thread.start()
-        print(f"X-Plane mode connected to {self.ip}:{self.port}")
+        logger.info("X-Plane mode connected to %s:%s", self.ip, self.port)
 
     def _worker(self) -> None:
         """Background worker thread receiving X-Plane data."""
@@ -236,7 +259,7 @@ class XPlaneRealtimeSource:
             self.simulator = Simulator(ip=self.ip, port=self.port)
             self.simulator.run(self.data_queue)
         except Exception as exc:
-            if self.error_queue.empty():
+            if self.error_queue.empty() and not self._stop_event.is_set():
                 self.error_queue.put(exc)
         finally:
             self.simulator = None
@@ -265,16 +288,16 @@ class XPlaneRealtimeSource:
         vertical_speed = float(data.get("vertical_speed", 0.0))
 
         enriched = dict(data)
-        enriched.setdefault("nav1_freq", 111.70)
-        enriched.setdefault("nav2_freq", 111.70)
-        enriched.setdefault("com1_freq", 121.800)
-        enriched.setdefault("com2_freq", 121.800)
+        enriched.setdefault("nav1_freq", Config.frequencies.nav1)
+        enriched.setdefault("nav2_freq", Config.frequencies.nav2)
+        enriched.setdefault("com1_freq", Config.frequencies.com1)
+        enriched.setdefault("com2_freq", Config.frequencies.com2)
         enriched.setdefault("ap_gps", True)
         enriched.setdefault("ap_ap", True)
         enriched.setdefault("ap_alt", True)
-        enriched.setdefault("ap_vs", abs(vertical_speed) > 200.0)
-        enriched.setdefault("bug_heading", _normalize_heading(heading + 8.0))
-        enriched.setdefault("bug_bearing", _normalize_heading(course + 95.0))
+        enriched.setdefault("ap_vs", abs(vertical_speed) > Config.commands.ap_vs_threshold)
+        enriched.setdefault("bug_heading", _normalize_heading(heading + Config.commands.heading_offset_deg))
+        enriched.setdefault("bug_bearing", _normalize_heading(course + Config.commands.bearing_offset_deg))
         return enriched
 
     def update_switch_states(self, states: Dict[str, int]) -> None:
@@ -284,7 +307,13 @@ class XPlaneRealtimeSource:
             simulator.set_switch_states(states)
 
     def stop(self) -> None:
-        pass
+        self._stop_event.set()
+        simulator = self.simulator
+        if simulator is not None:
+            simulator.stop()
+        if self.thread is not None:
+            self.thread.join(timeout=2.0)
+        self.thread = None
 
 
 class MSPClient:
@@ -407,7 +436,7 @@ class MSPRealtimeSource:
     altitude, and vertical speed via serial MSP protocol.
     """
 
-    def __init__(self, port: str, baudrate: int) -> None:
+    def __init__(self, port: str, baudrate: int, timeout: float | None = None) -> None:
         """Initialize MSP connection parameters.
 
         Args:
@@ -416,6 +445,7 @@ class MSPRealtimeSource:
         """
         self.port = port
         self.baudrate = baudrate
+        self.timeout = Config.msp.timeout if timeout is None else timeout
         self.data_queue: "queue.Queue[Dict[str, float]]" = queue.Queue(maxsize=200)
         self.error_queue: "queue.Queue[Exception]" = queue.Queue(maxsize=1)
         self.thread: Optional[threading.Thread] = None
@@ -423,22 +453,34 @@ class MSPRealtimeSource:
 
     def start(self) -> None:
         """Start background thread to poll MSP data."""
-        if self.thread is not None:
+        if self.thread is not None and self.thread.is_alive():
             return
         self._running.set()
         self.thread = threading.Thread(target=self._worker, daemon=True)
         self.thread.start()
-        print(f"MSP mode listening on {self.port} @ {self.baudrate} baud")
+        logger.info("MSP mode listening on %s @ %s baud", self.port, self.baudrate)
 
     def stop(self) -> None:
         """Stop MSP polling thread."""
         self._running.clear()
+        if self.thread is not None:
+            self.thread.join(timeout=2.0)
+        self.thread = None
 
     def _worker(self) -> None:
         client = None
         try:
-            client = MSPClient(self.port, self.baudrate)
-            telemetry = Telemetry(airspeed=100.0, altitude=0.0, heading=0.0, tas=100.0)
+            client = MSPClient(self.port, self.baudrate, timeout=self.timeout)
+            telemetry = Telemetry(
+                airspeed=100.0,
+                altitude=0.0,
+                heading=0.0,
+                tas=100.0,
+                nav1_freq=Config.frequencies.nav1,
+                nav2_freq=Config.frequencies.nav2,
+                com1_freq=Config.frequencies.com1,
+                com2_freq=Config.frequencies.com2,
+            )
 
             while self._running.is_set():
                 att_payload = client.request(MSPClient.MSP_ATTITUDE)
@@ -459,9 +501,9 @@ class MSPRealtimeSource:
                 telemetry.airspeed = synthetic_airspeed
                 telemetry.tas = synthetic_airspeed
 
-                telemetry.ap_vs = abs(telemetry.vertical_speed) > 300.0
-                telemetry.bug_heading = _normalize_heading(telemetry.heading + 8.0)
-                telemetry.bug_bearing = _normalize_heading(telemetry.course + 95.0)
+                telemetry.ap_vs = abs(telemetry.vertical_speed) > Config.commands.ap_vs_threshold
+                telemetry.bug_heading = _normalize_heading(telemetry.heading + Config.commands.heading_offset_deg)
+                telemetry.bug_bearing = _normalize_heading(telemetry.course + Config.commands.bearing_offset_deg)
 
                 if self.data_queue.full():
                     try:

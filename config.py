@@ -5,7 +5,7 @@ Centralizes all configurable parameters like screen dimensions, default frequenc
 GPIO pins, and communication settings.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 
 @dataclass
@@ -15,6 +15,7 @@ class ScreenConfig:
     height: int = 800
     max_fps: int = 60
     masked: bool = True
+    little: bool = False
 
 
 @dataclass
@@ -70,6 +71,20 @@ class XPlaneConfig:
 
 
 @dataclass
+class XPlaneSwitchPanelConfig:
+    """GPIO mapping for the optional X-Plane switch panel."""
+    battery_switch: int = 5
+    beacon_lights: int = 6
+    landing_lights: int = 13
+    taxi_lights: int = 19
+    nav_lights: int = 26
+    strobe_lights: int = 20
+    pitot_heat: int = 21
+    active_low: bool = True
+    debug: bool = False
+
+
+@dataclass
 class MSPConfig:
     """MSP serial connection configuration."""
     port: str = "/dev/tty.usbserial"
@@ -88,6 +103,14 @@ class CommandDefaults:
     ap_vs_threshold: float = 300.0       # Vertical speed threshold for AP
 
 
+@dataclass
+class RuntimeConfig:
+    """Runtime verbosity and diagnostics behavior."""
+    print_gpio_states: bool = True
+    gpio_print_interval_s: float = 0.5
+    log_level: str = "INFO"
+
+
 class Config:
     """Main configuration singleton for the application."""
 
@@ -95,9 +118,11 @@ class Config:
     frequencies: FrequencyDefaults = FrequencyDefaults()
     joystick: JoystickConfig = JoystickConfig()
     xplane: XPlaneConfig = XPlaneConfig()
+    xplane_switch_panel: XPlaneSwitchPanelConfig = XPlaneSwitchPanelConfig()
     msp: MSPConfig = MSPConfig()
     rotary: RotaryEncoderConfig = RotaryEncoderConfig()
     commands: CommandDefaults = CommandDefaults()
+    runtime: RuntimeConfig = RuntimeConfig()
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> None:
@@ -115,10 +140,20 @@ class Config:
             cls.joystick = JoystickConfig(**config_dict["joystick"])
         if "xplane" in config_dict:
             cls.xplane = XPlaneConfig(**config_dict["xplane"])
+        if "xplane_switch_panel" in config_dict:
+            cls.xplane_switch_panel = XPlaneSwitchPanelConfig(**config_dict["xplane_switch_panel"])
         if "msp" in config_dict:
             cls.msp = MSPConfig(**config_dict["msp"])
+        if "rotary" in config_dict:
+            rotary_cfg = dict(config_dict["rotary"])
+            gpio_cfg = rotary_cfg.get("gpio")
+            if isinstance(gpio_cfg, dict):
+                rotary_cfg["gpio"] = GPIOConfig(**gpio_cfg)
+            cls.rotary = RotaryEncoderConfig(**rotary_cfg)
         if "commands" in config_dict:
             cls.commands = CommandDefaults(**config_dict["commands"])
+        if "runtime" in config_dict:
+            cls.runtime = RuntimeConfig(**config_dict["runtime"])
 
     @classmethod
     def to_dict(cls) -> dict:
@@ -129,10 +164,13 @@ class Config:
             Dictionary representation of all configuration.
         """
         return {
-            "screen": cls.screen.__dict__,
-            "frequencies": cls.frequencies.__dict__,
-            "joystick": cls.joystick.__dict__,
-            "xplane": cls.xplane.__dict__,
-            "msp": cls.msp.__dict__,
-            "commands": cls.commands.__dict__,
+            "screen": asdict(cls.screen),
+            "frequencies": asdict(cls.frequencies),
+            "joystick": asdict(cls.joystick),
+            "xplane": asdict(cls.xplane),
+            "xplane_switch_panel": asdict(cls.xplane_switch_panel),
+            "msp": asdict(cls.msp),
+            "rotary": asdict(cls.rotary),
+            "commands": asdict(cls.commands),
+            "runtime": asdict(cls.runtime),
         }

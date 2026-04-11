@@ -5,7 +5,7 @@
 ### 1. Voir la démo des améliorations
 ```bash
 # Depuis le répertoire du projet
-python demo_improvements.py
+python3 demo_improvements.py
 ```
 Affiche des démonstrations pratiques de :
 - Configuration centralisée
@@ -16,14 +16,14 @@ Affiche des démonstrations pratiques de :
 
 ### 2. Lancer les tests
 ```bash
-# Tous les tests (34)
-python -m unittest test_pfd -v
+# Tous les tests (45)
+python3 -m unittest test_pfd -v
 
 # Un test spécifique
-python -m unittest test_pfd.TestCOMFrequencyAdjustment -v
+python3 -m unittest test_pfd.TestCOMFrequencyAdjustment -v
 
 # Avec résumé compact
-python -m unittest test_pfd 2>&1 | grep -E "^test_|Ran|OK"
+python3 -m unittest test_pfd 2>&1 | grep -E "^test_|Ran|OK"
 ```
 
 ### 3. Accéder à la documentation
@@ -35,6 +35,26 @@ cat IMPROVEMENTS.md
 # → Ouvrir config.py, main.py, display.py, modes.py
 # → Passer la souris sur les fonctions pour voir la documentation
 # → Utiliser Ctrl+K Ctrl+I pour voir la signature complète
+```
+
+---
+
+## 🎛️ Lancement CLI (sans prompts)
+
+Le programme accepte maintenant des options CLI. Si une option manque, un prompt interactif est encore proposé.
+
+```bash
+# Mode 1: joystick
+python3 main.py --mode 1 --joystick-name X52
+
+# Mode 2: X-Plane
+python3 main.py --mode 2 --xplane-ip 127.0.0.1 --xplane-port 49000
+
+# Mode 3: MSP
+python3 main.py --mode 3 --msp-port /dev/tty.usbserial --msp-baud 115200
+
+# Logging debug + pas de dump GPIO periodique
+python3 main.py --mode 2 --verbose --no-gpio-print
 ```
 
 ---
@@ -99,7 +119,7 @@ Descriptions détaillées de ce que font les fonctions, leurs paramètres, retou
 
 **Où les voir ?**
 - Dans VS Code : passer la souris sur une fonction → tooltip
-- Terminal : `python -c "from main import _adjust_com_frequency; help(_adjust_com_frequency)"`
+- Terminal : `python3 -c "from main import _adjust_com_frequency; help(_adjust_com_frequency)"`
 - Docstrings sont utilisés par IDE pour l'**autocomplétion** et l'**aide en ligne**
 
 **Exemple :**
@@ -135,11 +155,11 @@ _adjust_com_frequency(  # ← L'IDE affiche la signature complète
 ### (3) Suite de Tests Complète - `test_pfd.py`
 
 **Qu'est-ce que c'est ?**
-34 tests unitaires qui vérifient que les fonctions critiques fonctionnent correctement et qu'aucun changement ne les casse.
+45 tests unitaires qui vérifient que les fonctions critiques fonctionnent correctement et qu'aucun changement ne les casse.
 
 **Où les voir ?**
 ```bash
-python -m unittest test_pfd -v
+python3 -m unittest test_pfd -v
 ```
 
 **Couverture des tests :**
@@ -151,7 +171,7 @@ python -m unittest test_pfd -v
 | Télémétrie | 4 | Défauts, customs, sérialisation |
 | Configuration | 7 | Valeurs, import/export, validation |
 | Autres (écran, radios, modes) | 6 | Complétude |
-| **TOTAL** | **34** | ✅ 100% passing |
+| **TOTAL** | **45** | ✅ 100% passing |
 
 **Exemple de test :**
 ```python
@@ -164,17 +184,17 @@ def test_clamp_to_max(self):
 **Lancer les tests :**
 ```bash
 # Tous
-python -m unittest test_pfd -v
+python3 -m unittest test_pfd -v
 
 # Juste les fréquences COM
-python -m unittest test_pfd.TestCOMFrequencyAdjustment -v
+python3 -m unittest test_pfd.TestCOMFrequencyAdjustment -v
 
 # Juste un test
-python -m unittest test_pfd.TestCOMFrequencyAdjustment.test_adjust_frequency_up -v
+python3 -m unittest test_pfd.TestCOMFrequencyAdjustment.test_adjust_frequency_up -v
 
 # Avec coverage (si installé)
-pip install coverage
-coverage run -m unittest test_pfd
+python3 -m pip install coverage
+python3 -m coverage run -m unittest test_pfd
 coverage report
 ```
 
@@ -185,7 +205,7 @@ coverage report
 | Fichier | Création | Description |
 |---------|----------|-------------|
 | `config.py` | ✨ Nouveau | Gestion centralisée de configuration |
-| `test_pfd.py` | ✨ Nouveau | 34 tests unitaires |
+| `test_pfd.py` | ✨ Nouveau | 45 tests unitaires |
 | `demo_improvements.py` | ✨ Nouveau | Démonstration des améliorations |
 | `IMPROVEMENTS.md` | ✨ Nouveau | Guide détaillé des améliorations |
 | `main.py` | 📝 Mis à jour | Docstrings ajoutées |
@@ -260,14 +280,14 @@ Config.from_dict(config_dict)
 
 3. **Ajouter type checking avec mypy** :
    ```bash
-   pip install mypy
+    python3 -m pip install mypy
    mypy --strict main.py modes.py display.py
    ```
 
 4. **Tests dans CI/CD** (GitHub Actions) :
    ```yaml
-   - name: Run tests
-     run: python -m unittest discover
+    - name: Run tests
+      run: python3 -m unittest discover
    ```
 
 ---
@@ -278,7 +298,7 @@ Config.from_dict(config_dict)
 R: `Config.frequencies.com1 = 124.500` ou charger depuis JSON
 
 **Q: Les tests ralentissent l'app ?**  
-R: Non, ils s'exécutent avec `python -m unittest`, pas pendant l'exécution normale
+R: Non, ils s'exécutent avec `python3 -m unittest`, pas pendant l'exécution normale
 
 **Q: Can I use the config from external files?**  
 A: Yes! `Config.from_dict(json.load(f))` lets you load from JSON/YAML

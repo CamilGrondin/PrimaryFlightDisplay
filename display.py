@@ -1,5 +1,7 @@
 import math
 import time
+
+from config import CommandDefaults, Config, FrequencyDefaults, ScreenConfig
 from pfd import AircraftState, PrimaryFlightDisplay
 
 
@@ -9,12 +11,23 @@ class DisplayPFD:
     Manages screen configuration and aircraft state visualization.
     """
 
-    def __init__(self):
-        """Initialize display with default screen dimensions."""
-        SCREEN_WIDTH = 1000
-        SCREEN_HEIGHT = 800
+    def __init__(
+        self,
+        screen_config: ScreenConfig | None = None,
+        frequency_defaults: FrequencyDefaults | None = None,
+        command_defaults: CommandDefaults | None = None,
+    ):
+        """Initialize display with configurable screen and aircraft defaults."""
+        self.screen_config = screen_config or Config.screen
+        self.frequency_defaults = frequency_defaults or Config.frequencies
+        self.command_defaults = command_defaults or Config.commands
 
-        self.PFD = PrimaryFlightDisplay((SCREEN_WIDTH, SCREEN_HEIGHT), masked=True, max_fps=60)
+        self.PFD = PrimaryFlightDisplay(
+            (self.screen_config.width, self.screen_config.height),
+            masked=self.screen_config.masked,
+            max_fps=self.screen_config.max_fps,
+            little=self.screen_config.little,
+        )
         self.t0 = time.time()
 
     def update_display(
@@ -26,16 +39,16 @@ class DisplayPFD:
         pitch: float,
         roll: float = 0.0,
         course: float | None = None,
-        nav1_freq: float = 111.70,
-        nav2_freq: float = 111.70,
-        com1_freq: float = 121.800,
-        com2_freq: float = 121.800,
+        nav1_freq: float | None = None,
+        nav2_freq: float | None = None,
+        com1_freq: float | None = None,
+        com2_freq: float | None = None,
         ap_gps: bool = True,
         ap_ap: bool = True,
         ap_alt: bool = True,
         ap_vs: bool = False,
-        bug_heading: float = 0.0,
-        bug_bearing: float = 0.0,
+        bug_heading: float | None = None,
+        bug_bearing: float | None = None,
     ) -> None:
         """Update and render the Primary Flight Display with current aircraft state.
 
@@ -47,33 +60,42 @@ class DisplayPFD:
             pitch: Aircraft pitch angle in degrees.
             roll: Aircraft roll angle in degrees (default: 0).
             course: Wind course in degrees; defaults to heading if None.
-            nav1_freq: NAV1 frequency in MHz (default: 111.70).
-            nav2_freq: NAV2 frequency in MHz (default: 111.70).
-            com1_freq: COM1 frequency in MHz (default: 121.800).
-            com2_freq: COM2 frequency in MHz (default: 121.800).
+            nav1_freq: NAV1 frequency in MHz (default from config).
+            nav2_freq: NAV2 frequency in MHz (default from config).
+            com1_freq: COM1 frequency in MHz (default from config).
+            com2_freq: COM2 frequency in MHz (default from config).
             ap_gps: Autopilot GPS mode active (default: True).
             ap_ap: Autopilot mode active (default: True).
             ap_alt: Autopilot altitude hold active (default: True).
             ap_vs: Autopilot vertical speed mode active (default: False).
-            bug_heading: Heading bug position in degrees (default: 0).
-            bug_bearing: Bearing bug position in degrees (default: 0).
+            bug_heading: Heading bug position in degrees (defaults to heading).
+            bug_bearing: Bearing bug position in degrees (defaults to course).
         """
         t = time.time() - self.t0
         if course is None:
             course = heading
-        if bug_heading == 0.0:
+        if bug_heading is None:
             bug_heading = heading
-        if bug_bearing == 0.0:
+        if bug_bearing is None:
             bug_bearing = course
+
+        if nav1_freq is None:
+            nav1_freq = self.frequency_defaults.nav1
+        if nav2_freq is None:
+            nav2_freq = self.frequency_defaults.nav2
+        if com1_freq is None:
+            com1_freq = self.frequency_defaults.com1
+        if com2_freq is None:
+            com2_freq = self.frequency_defaults.com2
 
         state = AircraftState(
             pitch=pitch,
             roll=roll,
             airspeed=airspeed,
-            airspeed_cmd=250.0,
+            airspeed_cmd=self.command_defaults.airspeed_cmd,
             vspeed=vertical_speed,
             altitude=altitude,
-            altitude_cmd=38000.0,
+            altitude_cmd=self.command_defaults.altitude_cmd,
             heading=heading,
             heading_cmd=bug_heading,
             course=course,

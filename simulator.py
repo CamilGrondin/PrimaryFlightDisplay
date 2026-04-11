@@ -1,18 +1,22 @@
 import struct
 import socket
 import threading
-from queue import Queue, Empty
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 class Simulator:
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, socket_timeout_s=1.0):
         """
         Initialize the simulator with IP and port for UDP communication.
         """
         self.ip = ip
         self.port = port
-        self.sock, self.address = self.initialize_socket(ip, port)
-        self.data_queue = Queue()  # Ensure Queue is instantiated correctly
+        self.sock, self.address = self.initialize_socket(ip, port, socket_timeout_s)
         self._switch_lock = threading.Lock()
+        self._running = threading.Event()
+        self._running.set()
 
         self.datarefs = {
             "airspeed": (0, b'sim/flightmodel/position/indicated_airspeed\0'),
@@ -63,11 +67,11 @@ class Simulator:
             "pitot_heat": 0,
         }
 
-    def initialize_socket(self, ip, port):
+    def initialize_socket(self, ip, port, socket_timeout_s):
         """Initialize and return a UDP socket."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.settimeout(2.0)  # 2 second timeout for socket operations
+        sock.settimeout(float(socket_timeout_s))
         return sock, (ip, port)
 
     def pack_dataref_command(self, command, frequency, index, path):
@@ -99,6 +103,14 @@ class Simulator:
         for cmd in commands:
             self.sock.sendto(cmd, self.address)
 
+    def stop(self):
+        """Request the simulator loop to stop and unblock socket reads."""
+        self._running.clear()
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
     def set_switch_states(self, states):
         """Update simulator switch states from external GPIO inputs."""
         if not isinstance(states, dict):
@@ -129,18 +141,27 @@ class Simulator:
 
     def receive_and_process_data(self):
         """Receive and process data from the simulator."""
-        data, _ = self.sock.recvfrom(2048)
+        try:
+            data, _ = self.sock.recvfrom(2048)
+        except socket.timeout:
+            return None
+        except OSError:
+            if self._running.is_set():
+                raise
+            return None
+
         header = data[:4]
         if header != b'RREF':
-            raise ValueError("Unknown packet header received.")
+            logger.debug("Unknown packet header received: %s", header)
+            return None
         
         results = {}
         for i in range(5, len(data), 8):
-            idx, value = struct.unpack("<if", data[i:i + 8])
+            chunk = data[i:i + 8]
+            if len(chunk) != 8:
+                continue
+            idx, value = struct.unpack("<if", chunk)
             results[idx] = value
-        
-        # print(f"Processed results: {results}")
-        self.data_queue.put(results)  # Add results to the queue without overwriting Queue
         return results
 
     def run(self, data_queue):
@@ -152,7 +173,7 @@ class Simulator:
         """
         self.subscribe_datarefs()
         try:
-            while True:
+            while self._running.is_set():
                 irl_states = self._snapshot_switch_states()
                 self._refresh_calculated_switches(irl_states)
 
@@ -168,6 +189,8 @@ class Simulator:
                 self.send_commands(beacon_command)
 
                 results = self.receive_and_process_data()
+                if results is None:
+                    continue
                 
                 airspeed = max(round(results.get(self.datarefs["airspeed"][0], 0)), 0)
                 altitude = round(results.get(self.datarefs["altitude"][0], 0))
@@ -180,21 +203,38 @@ class Simulator:
                 
                 # Send results to the queue
                 data = {"airspeed": airspeed, "altitude": altitude, "vertical_speed": vertical_speed, "heading": heading, "tas": tas, "course": course, "pitch": pitch, "roll": roll}
-                data_queue.put(data)
-                print("airspeed=" + str(airspeed) + ", altitude=" + str(altitude) + ", vertical_speed=" + str(vertical_speed) + ", heading=" + str(heading) + ", tas=" + str(tas) + ", course=" + str(course) + ", pitch=" + str(pitch) + ", roll=" + str(roll))
-        except KeyboardInterrupt:
-            print("Interrupted by user.")
-            raise
+                if data_queue.full():
+                    try:
+                        data_queue.get_nowait()
+                    except Exception:
+                        pass
+                data_queue.put_nowait(data)
+                logger.debug(
+                    "X-Plane data airspeed=%s altitude=%s vertical_speed=%s heading=%s tas=%s course=%s pitch=%s roll=%s",
+                    airspeed,
+                    altitude,
+                    vertical_speed,
+                    heading,
+                    tas,
+                    course,
+                    pitch,
+                    roll,
+                )
         except (OSError, TimeoutError) as e:
-            print("Connection error in simulator: " + str(e))
-            raise
+            if self._running.is_set():
+                logger.warning("Connection error in simulator: %s", e)
+                raise
         except Exception as e:
-            print("Error in simulator: " + str(e))
+            logger.exception("Error in simulator: %s", e)
             raise
         finally:
-            print("Unsubscribing from DataRefs and closing socket.")
+            self._running.clear()
+            logger.info("Unsubscribing from DataRefs and closing socket")
             try:
                 self.unsubscribe_datarefs()
+            except Exception:
+                pass
+            try:
                 self.sock.close()
-            except:
+            except Exception:
                 pass
