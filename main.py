@@ -470,7 +470,7 @@ def choose_mode(selected_mode: int | None = None) -> int:
         selected_mode: Optional pre-selected mode from CLI.
 
     Returns:
-        MODE_JOYSTICK (1), MODE_XPLANE (2), or MODE_MSP (3).
+        MODE_JOYSTICK (1, manual), MODE_XPLANE (2), or MODE_MSP (3).
     """
     if selected_mode is not None:
         if selected_mode in (MODE_JOYSTICK, MODE_XPLANE, MODE_MSP):
@@ -478,7 +478,7 @@ def choose_mode(selected_mode: int | None = None) -> int:
         raise ValueError("Mode must be 1, 2, or 3.")
 
     print("Primary Flight Display")
-    print("1 - Manual control via joystick Saitek X52")
+    print("1 - Manuel: manual control (joystick or keyboard)")
     print("2 - Real-time data from X-Plane (UDP)")
     print("3 - IMU data from flight controller via MSP")
     while True:
@@ -497,12 +497,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mode", type=int, choices=[MODE_JOYSTICK, MODE_XPLANE, MODE_MSP])
     parser.add_argument("--config", help="Path to a JSON configuration file")
 
-    parser.add_argument("--joystick-name", help="Joystick name hint for mode 1")
+    parser.add_argument("--joystick-name", help="Manual mode joystick name hint for mode 1")
     parser.add_argument(
         "--control-device",
         choices=["auto", "joystick", "keyboard"],
         default="auto",
-        help="Mode 1 input device (auto, joystick, keyboard)",
+        help="Mode 1 (Manuel) input device (auto, joystick, keyboard)",
     )
     parser.add_argument("--xplane-ip", help="X-Plane IP address for mode 2")
     parser.add_argument("--xplane-port", type=int, help="X-Plane UDP port for mode 2")
@@ -569,21 +569,23 @@ def build_source(mode: int, args: argparse.Namespace):
     """Create and configure telemetry source based on selected mode.
 
     Args:
-        mode: Operating mode (1=Joystick, 2=X-Plane, 3=MSP).
+        mode: Operating mode (1=Manual, 2=X-Plane, 3=MSP).
         args: Parsed CLI arguments.
 
     Returns:
         Initialized telemetry source (JoystickManualSource, XPlaneRealtimeSource, or MSPRealtimeSource).
     """
     if mode == MODE_JOYSTICK:
-        joystick_name = args.joystick_name or prompt_text("Joystick name hint", Config.joystick.name_hint)
+        joystick_name = args.joystick_name or prompt_text("Manual mode joystick name hint", Config.joystick.name_hint)
         source = JoystickManualSource(
             joystick_name_hint=joystick_name,
             control_device=args.control_device,
         )
-        logger.info("Mode 1 active: manual control via %s", source.input_mode)
+        logger.info("Mode 1 Manuel active: manual control via %s", source.input_mode)
         if source.input_mode == "keyboard":
-            logger.info("Keyboard controls: A/D roll, W/S pitch, R/F throttle, HOME/END max/min throttle")
+            logger.info(
+                "Keyboard controls: Q/D (or A/D) roll, Z/S (or W/S) pitch, R/F throttle, HOME/END max/min throttle"
+            )
         return source
 
     if mode == MODE_XPLANE:

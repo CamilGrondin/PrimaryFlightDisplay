@@ -102,7 +102,7 @@ def _normalize_heading(value: float) -> float:
 
 
 class JoystickManualSource:
-    """Manual flight control via joystick input.
+    """Manual flight control via joystick or keyboard input.
 
     Reads joystick axes and simulates realistic aircraft dynamics
     including bank-to-turn calculation and speed ramping.
@@ -114,9 +114,6 @@ class JoystickManualSource:
         Args:
             joystick_name_hint: Substring to match joystick name (default from config).
             control_device: Input preference for mode 1: auto, joystick, keyboard.
-
-        Raises:
-            RuntimeError: If joystick is required but none is detected.
         """
         joystick_cfg = Config.joystick
         command_cfg = Config.commands
@@ -141,7 +138,7 @@ class JoystickManualSource:
                     selected = candidate
 
         if device == "joystick" and selected is None:
-            raise RuntimeError("No joystick detected. Connect a joystick and restart.")
+            logger.warning("No joystick detected. Falling back to keyboard controls for mode 1.")
 
         self.joystick = selected
         self.input_mode = "joystick" if self.joystick is not None else "keyboard"
@@ -205,13 +202,13 @@ class JoystickManualSource:
         keys = pygame.key.get_pressed()
 
         roll_axis = 0.0
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+        if keys[pygame.K_a] or keys[pygame.K_q] or keys[pygame.K_LEFT]:
             roll_axis -= 1.0
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
             roll_axis += 1.0
 
         pitch_axis = 0.0
-        if keys[pygame.K_w] or keys[pygame.K_UP]:
+        if keys[pygame.K_w] or keys[pygame.K_z] or keys[pygame.K_UP]:
             pitch_axis -= 1.0
         if keys[pygame.K_s] or keys[pygame.K_DOWN]:
             pitch_axis += 1.0

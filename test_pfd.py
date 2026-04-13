@@ -12,6 +12,7 @@ from unittest.mock import patch
 from dataclasses import asdict
 import time
 
+import modes
 from config import (
     CommandDefaults,
     Config,
@@ -366,10 +367,30 @@ class TestMode1InputSelection(unittest.TestCase):
             source = JoystickManualSource(control_device="keyboard")
             self.assertEqual(source.input_mode, "keyboard")
 
-    def test_joystick_mode_requires_joystick(self):
+    def test_joystick_mode_falls_back_when_no_joystick(self):
         with patch("modes.pygame.joystick.get_count", return_value=0):
-            with self.assertRaises(RuntimeError):
-                JoystickManualSource(control_device="joystick")
+            source = JoystickManualSource(control_device="joystick")
+            self.assertEqual(source.input_mode, "keyboard")
+
+    def test_keyboard_supports_zqsd_layout(self):
+        class _FakePressedKeys:
+            def __init__(self, pressed_keys):
+                self.pressed_keys = pressed_keys
+
+            def __getitem__(self, key):
+                return key in self.pressed_keys
+
+        with patch("modes.pygame.joystick.get_count", return_value=0):
+            source = JoystickManualSource(control_device="keyboard")
+
+        pressed = {modes.pygame.K_q, modes.pygame.K_z}
+        with patch("modes.pygame.event.pump"), patch(
+            "modes.pygame.key.get_pressed", return_value=_FakePressedKeys(pressed)
+        ):
+            roll_axis, pitch_axis, _throttle = source._read_keyboard_controls(dt=0.1)
+
+        self.assertEqual(roll_axis, -1.0)
+        self.assertEqual(pitch_axis, -1.0)
 
 
 class TestCom1RotarySelection(unittest.TestCase):

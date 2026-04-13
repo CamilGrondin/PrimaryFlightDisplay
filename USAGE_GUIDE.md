@@ -44,10 +44,10 @@ cat IMPROVEMENTS.md
 Le programme accepte maintenant des options CLI. Si une option manque, un prompt interactif est encore proposé.
 
 ```bash
-# Mode 1: joystick
+# Mode 1: Manuel (joystick)
 python3 main.py --mode 1 --joystick-name X52
 
-# Mode 1: clavier uniquement
+# Mode 1: Manuel (clavier uniquement)
 python3 main.py --mode 1 --control-device keyboard
 
 # Mode 2: X-Plane
@@ -61,8 +61,8 @@ python3 main.py --mode 2 --verbose --no-gpio-print
 ```
 
 Mode 1 clavier:
-- Roulis: `A/D` ou fleches Gauche/Droite
-- Tangage: `W/S` ou fleches Haut/Bas
+- Roulis: `Q/D` (AZERTY), `A/D` (QWERTY) ou fleches Gauche/Droite
+- Tangage: `Z/S` (AZERTY), `W/S` (QWERTY) ou fleches Haut/Bas
 - Gaz: `R/F`, `PageUp/PageDown`, `Home` (max), `End` (min)
 
 Mode 2 hors Raspberry Pi:
